@@ -1,0 +1,21 @@
+[conn.JSONPLACEHOLDER]
+type = "api"
+base_url = "https://jsonplaceholder.typicode.com"
+rate_limit = "600/m"
+
+[conn.POKEAPI]
+type = "api"
+base_url = "https://pokeapi.co/api/v2"
+rate_limit = "100/m"
+
+[conn.DUMMYJSON]
+type = "api"
+base_url = "https://dummyjson.com"
+
+[conn.SALES]
+type = "sqlite"
+path = "sales.db"
+
+[conn.OUT]
+type = "sqlite"
+path = "tummy_examples.db"

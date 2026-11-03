@@ -1,0 +1,23 @@
+source = "DUMMYJSON"
+target = "OUT"
+mode = "incremental"
+primary_key = ["id"]
+
+[streams.products]
+path = "/products"
+records = "products[]"
+paginate = "offset"
+page_param = "skip"
+size_param = "limit"
+page_size = 30
+
+[streams.product_reviews]
+path = "/products/{products.id}"
+for_each = "products"
+records = "reviews[]"
+add_columns = { product_id = "{products.id}" }
+mode = "full-refresh"
+
+[streams.categories]
+path = "/products/categories"
+mode = "full-refresh"

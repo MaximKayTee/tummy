@@ -1,0 +1,18 @@
+source = "POKEAPI"
+target = "OUT"
+mode = "full-refresh"
+
+[streams.pokemon]
+path = "/pokemon"
+records = "results[]"
+paginate = "cursor"
+cursor_field = "next"
+page_size = 100
+limit = 250
+
+[streams.berry]
+path = "/berry"
+records = "results[]"
+paginate = "cursor"
+cursor_field = "next"
+page_size = 50

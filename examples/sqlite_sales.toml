@@ -1,0 +1,15 @@
+source = "SALES"
+target = "OUT"
+mode = "incremental"
+primary_key = ["id"]
+exclude = ["tmp_*"]
+
+[streams."*"]
+
+[streams.orders]
+update_key = "updated_at"
+
+[streams.daily]
+sql = "select updated_at as day, sum(total) as total from orders group by 1"
+object = "daily_totals"
+mode = "full-refresh"

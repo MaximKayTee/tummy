@@ -1,0 +1,5 @@
+/tummy
+*.db
+*.db-wal
+*.db-shm
+/.dev/

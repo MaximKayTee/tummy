@@ -1,0 +1,18 @@
+source = "JSONPLACEHOLDER"
+target = "OUT"
+mode = "full-refresh"
+
+[streams.users]
+path = "/users"
+
+[streams.user_posts]
+path = "/users/{users.id}/posts"
+for_each = "users"
+add_columns = { user_name = "{users.name}" }
+
+[streams.posts_paged]
+path = "/posts"
+paginate = "page"
+page_param = "_page"
+size_param = "_limit"
+page_size = 25

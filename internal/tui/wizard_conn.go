@@ -1,0 +1,565 @@
+package tui
+
+import (
+	"cmp"
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+	"tummy/internal/txt"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"tummy/internal/api"
+	"tummy/internal/config"
+	"tummy/internal/db"
+	"tummy/internal/probe"
+)
+
+type wizResult int
+
+const (
+	wizContinue wizResult = iota
+	wizDone
+	wizCancel
+)
+
+// wizard is a multi-step editor that takes over the body until it finishes.
+type wizard interface {
+	start() tea.Cmd
+	update(msg tea.Msg) (wizResult, tea.Cmd)
+	view(width, height int) []string
+	title() string
+	help() string
+	result() statusMsg
+	saved() string // name of what was saved, to select it
+}
+
+// wizAsk is a y/n question inside a wizard; esc goes back to where it was asked.
+type wizAsk struct {
+	text    string
+	yes, no func() (wizResult, tea.Cmd)
+}
+
+func (a *wizAsk) key(msg tea.KeyMsg) (wizResult, tea.Cmd, bool) {
+	switch msg.String() {
+	case "y", "Y":
+		return wrapRes(a.yes)
+	case "n", "N":
+		if a.no != nil {
+			return wrapRes(a.no)
+		}
+		return wizContinue, nil, true
+	case "esc":
+		return wizContinue, nil, true
+	}
+	return wizContinue, nil, false
+}
+
+func wrapRes(fn func() (wizResult, tea.Cmd)) (wizResult, tea.Cmd, bool) {
+	r, c := fn()
+	return r, c, true
+}
+
+// nameRe is the name rule of config.ValidName, for callers that match a pattern.
+var nameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// connTypes are the database dialects and api.
+func connTypes() []string { return append(db.Dialects(), "api") }
+
+type connProbeMsg struct {
+	Name    string
+	Tables  []string
+	Schemas []string // databases with schemas
+	Err     error
+	Took    time.Duration
+}
+
+type connStep int
+
+const (
+	connEdit connStep = iota
+	connTest
+)
+
+type connWizard struct {
+	opts      Options
+	conns     *config.Connections // raw, for editing
+	original  string
+	base      config.Conn // as written: keys the form does not show are kept
+	form      *form
+	step      connStep
+	probing   bool
+	probe     *connProbeMsg
+	done      statusMsg
+	savedName string
+	saveErr   string
+	ask       *wizAsk
+}
+
+var urlExamples = map[string]string{
+	"postgres": "postgres://user:${PG_PASS}@host:5432/db?sslmode=disable",
+	"mysql":    "mysql://user:${MYSQL_PASS}@host:3306/db",
+	"mssql":    "sqlserver://user:${MSSQL_PASS}@host:1433?database=db",
+}
+
+func newConnWizard(opts Options, editing string) (*connWizard, error) {
+	conns, err := config.LoadConnectionsRaw(opts.Connections)
+	if err != nil {
+		return nil, err
+	}
+	w := &connWizard{opts: opts, conns: conns, original: editing}
+	if editing != "" {
+		cur, ok := conns.Conn[editing]
+		if !ok {
+			return nil, fmt.Errorf("connection %s not found", editing)
+		}
+		w.base = *cur
+	}
+	c := w.base
+	isDB := func(f *form) bool { t := f.get("type"); return t != "api" && t != "sqlite" }
+	isAPI := func(f *form) bool { return f.get("type") == "api" }
+	authIs := func(vals ...string) func(*form) bool {
+		return func(f *form) bool { return isAPI(f) && slices.Contains(vals, f.get("auth")) }
+	}
+	title := "New connection"
+	if editing != "" {
+		title = "Edit connection " + editing
+	}
+	dir := shortHome(filepath.Dir(opts.Connections))
+	w.form = newForm(title,
+		text("name", "Name", "letters, digits, _ -").eg("DEVPG").def(c.Name).required().check(func(v string) error {
+			if !config.ValidName(v) {
+				return errors.New("letters, digits, _ -")
+			}
+			if _, exists := conns.Conn[v]; exists && v != editing {
+				return errors.New("exists")
+			}
+			return nil
+		}),
+		choice("type", "Type", "", connTypes()...).def(cmp.Or(c.Type, "postgres")),
+		text("url", "URL", "").def(c.URL).when(isDB).required().masked().helpFn(func(f *form) string {
+			if f.get("url") != "" {
+				return "${VAR}: environment"
+			}
+			return urlExamples[f.get("type")] + "   ${VAR}: environment"
+		}),
+		combo("schema", "Schema", "for unqualified table names; ctrl+t lists them", "").empty("default").eg("public   dbo").def(c.Schema).when(isDB),
+		text("path", "Path", "relative to "+dir).eg("shop.db").def(c.Path).when(func(f *form) bool { return f.get("type") == "sqlite" }).required(),
+		text("base_url", "Base URL", "stream paths are appended").eg("https://api.example.com/v1").def(c.BaseURL).when(isAPI).required(),
+		choice("auth", "Auth", "", "", "bearer", "basic", "header", "query").empty("none").def(c.Auth).when(isAPI),
+		secret("token", "Token", "${VAR}: environment").eg("${API_TOKEN}").def(c.Token).when(authIs("bearer")).required(),
+		text("header", "Header", "").eg("X-Api-Key").def(c.Header).when(authIs("header")),
+		secret("token_h", "Key", "${VAR}: environment").eg("${API_KEY}").def(c.Token).when(authIs("header")).required(),
+		text("param", "Parameter", "").eg("api_key").def(c.Param).when(authIs("query")).required(),
+		secret("token_q", "Key", "${VAR}: environment").eg("${API_KEY}").def(c.Token).when(authIs("query")).required(),
+		text("user", "User", "").def(c.User).when(authIs("basic")).required(),
+		secret("password", "Password", "${VAR}: environment").eg("${API_PASS}").def(c.Password).when(authIs("basic")),
+		text("rate_limit", "Rate limit", "shared by every stream").eg("100/m   10/s   5000/h").def(c.RateLimit).when(isAPI).check(func(v string) error {
+			_, err := api.ParseRate(v)
+			return err
+		}),
+		text("retry_on", "Retry on", "HTTP statuses retried with backoff").eg("429, 502, 503, 504").def(ints(c.RetryOn)).when(isAPI).check(func(v string) error {
+			_, err := parseInts(v)
+			return err
+		}),
+		text("headers", "Headers", "sent with every request to the base URL host").eg("X-Tenant = acme, Accept = application/json").def(pairs(c.Headers)).when(isAPI).check(checkPairs),
+		text("timeout", "Timeout", "per request; blank: 2m").eg("30s").def(c.Timeout).when(isAPI).check(func(v string) error {
+			if d, err := time.ParseDuration(v); err != nil || d <= 0 {
+				return errors.New("a duration: 30s, 5m")
+			}
+			return nil
+		}),
+	)
+	w.form.done = "save"
+	if c.Schema != "" {
+		w.form.field("schema").Options = []string{"", c.Schema}
+	}
+	return w, nil
+}
+
+func (w *connWizard) title() string {
+	if w.original != "" {
+		return "edit " + w.original
+	}
+	return "new connection"
+}
+
+func (w *connWizard) help() string {
+	l, r := w.footer()
+	return l + "  " + r
+}
+
+func (w *connWizard) footer() (string, string) {
+	switch {
+	case w.ask != nil:
+		return sWarn.Render(txt.Clean(w.ask.text)), helpLine("esc", "back")
+	case w.step == connTest && w.canCreate() != "":
+		return helpLine("c", "create file", "ctrl+s", "save", "t", "test again"), helpLine("esc", "edit")
+	case w.step == connTest:
+		return helpLine("ctrl+s", "save", "t", "test again"), helpLine("esc", "edit")
+	}
+	return helpLine(append(w.form.hints(), "ctrl+s", "save", "ctrl+t", "test")...), helpLine("esc", escWord(w.form, "cancel"))
+}
+
+// escWord is what esc does: cancel an open list, else the given word.
+func escWord(f *form, otherwise string) string {
+	if f != nil && f.drop != nil {
+		return "cancel list"
+	}
+	return otherwise
+}
+
+func (w *connWizard) typing() bool { return w.step == connEdit && w.ask == nil && w.form.typing() }
+func (w *connWizard) dirty() bool  { return w.form.changed() }
+
+func (w *connWizard) keyHelp() (string, [][2]string) {
+	return "connection", [][2]string{
+		{"ctrl+s", "save"},
+		{"ctrl+t", "test: connect, list tables and schemas"},
+		{"c", "after a test: create a missing sqlite file"},
+		{"esc", "cancel"},
+	}
+}
+
+// canCreate is the sqlite file the last test did not find, else "".
+func (w *connWizard) canCreate() string {
+	if w.probe == nil || w.probe.Err == nil || w.probing {
+		return ""
+	}
+	return missingFile(w.conn())
+}
+
+func (w *connWizard) result() statusMsg { return w.done }
+func (w *connWizard) saved() string     { return w.savedName }
+func (w *connWizard) start() tea.Cmd    { return w.form.focus() }
+
+// conn builds the connection from the form, on top of the one being edited.
+func (w *connWizard) conn() *config.Conn {
+	f := w.form
+	c := w.base
+	c.Name, c.Type = f.get("name"), f.get("type")
+	c.Dir = filepath.Dir(w.opts.Connections)
+	c.URL, c.Schema, c.Path, c.BaseURL, c.Auth = "", "", "", "", ""
+	c.Token, c.Header, c.Param, c.User, c.Password, c.RateLimit, c.RetryOn = "", "", "", "", "", "", nil
+	switch c.Type {
+	case "sqlite":
+		c.Path = f.get("path")
+	case "api":
+		c.BaseURL, c.Auth = f.get("base_url"), f.get("auth")
+		switch c.Auth {
+		case "bearer":
+			c.Token = f.get("token")
+		case "header":
+			c.Header, c.Token = f.get("header"), f.get("token_h")
+		case "query":
+			c.Param, c.Token = f.get("param"), f.get("token_q")
+		case "basic":
+			c.User, c.Password = f.get("user"), f.get("password")
+		}
+		c.RateLimit = f.get("rate_limit")
+		c.RetryOn, _ = parseInts(f.get("retry_on"))
+		if f.fieldChanged("headers") {
+			c.Headers, _ = parsePairs(f.get("headers"))
+		}
+		c.Timeout = f.get("timeout")
+	default:
+		c.URL, c.Schema = f.get("url"), f.get("schema")
+	}
+	if c.Type != "api" {
+		c.Headers, c.Timeout = nil, ""
+	}
+	return &c
+}
+
+func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
+	switch msg := msg.(type) {
+	case connProbeMsg:
+		w.probing = false
+		w.probe = &msg
+		if fl := w.form.field("schema"); fl != nil && len(msg.Schemas) > 0 {
+			fl.Options = append([]string{""}, msg.Schemas...)
+		}
+		return wizContinue, nil
+	case tea.KeyMsg:
+		if w.ask != nil {
+			ask := w.ask
+			res, cmd, ok := ask.key(msg)
+			if ok {
+				w.ask = nil
+			}
+			return res, cmd
+		}
+		if w.step == connTest {
+			switch msg.String() {
+			case "esc", "backspace":
+				w.step = connEdit
+				return wizContinue, w.form.focus()
+			case "t", "ctrl+t":
+				return wizContinue, w.startProbe()
+			case "c":
+				if path := w.canCreate(); path != "" {
+					if err := probe.CreateSQLite(path); err != nil {
+						w.saveErr = err.Error()
+						return wizContinue, nil
+					}
+					return wizContinue, w.startProbe()
+				}
+			case "ctrl+s":
+				return w.trySave()
+			}
+			return wizContinue, nil
+		}
+		switch msg.String() {
+		case "ctrl+t":
+			w.form.commit()
+			if !w.form.validate() {
+				return wizContinue, w.form.focus()
+			}
+			w.step = connTest
+			w.saveErr = ""
+			return wizContinue, w.startProbe()
+		case "ctrl+s":
+			w.form.commit()
+			return w.trySave()
+		}
+		res, cmd := w.form.update(msg)
+		switch res {
+		case formCancel:
+			return wizCancel, nil
+		case formSubmit:
+			return w.trySave()
+		}
+		return wizContinue, cmd
+	}
+	return wizContinue, nil
+}
+
+func (w *connWizard) startProbe() tea.Cmd {
+	w.probing = true
+	w.probe = nil
+	c := w.conn()
+	return func() tea.Msg { return probeConn(c) }
+}
+
+// probeConn connects and lists what the connection can see.
+func probeConn(c *config.Conn) connProbeMsg {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	res, err := probe.Conn(ctx, c, "")
+	msg := connProbeMsg{Name: c.Name, Tables: res.Tables, Err: err, Took: res.Took}
+	if err == nil && c.Type != "api" {
+		if x, err := c.Expanded(); err == nil {
+			if d, err := db.Open(ctx, x.DB()); err == nil {
+				msg.Schemas, _ = d.ListSchemas(ctx)
+				d.Close()
+			}
+		}
+	}
+	return msg
+}
+
+// trySave validates and saves; a rename asks about the replications using the old name.
+func (w *connWizard) trySave() (wizResult, tea.Cmd) {
+	if !w.form.validate() {
+		w.step = connEdit
+		return wizContinue, w.form.focus()
+	}
+	c := w.conn()
+	if w.original == "" || c.Name == w.original {
+		return w.finish(nil)
+	}
+	users := usersOf(w.opts.Home, w.original)
+	if len(users) == 0 {
+		return w.finish(nil)
+	}
+	w.ask = &wizAsk{
+		text: fmt.Sprintf("rename %s to %s in %s too? y/n", w.original, c.Name, strings.Join(users, ", ")),
+		yes:  func() (wizResult, tea.Cmd) { return w.finish(users) },
+		no: func() (wizResult, tea.Cmd) {
+			res, cmd := w.finish(nil)
+			if res == wizDone {
+				verb := "uses"
+				if len(users) > 1 {
+					verb = "use"
+				}
+				w.done = statusMsg{Text: fmt.Sprintf("saved: %s; %s still %s %s", c.Name, strings.Join(users, ", "), verb, w.original), IsErr: true}
+			}
+			return res, cmd
+		},
+	}
+	return wizContinue, nil
+}
+
+// finish writes connections.toml, then points the given replications at the new name.
+func (w *connWizard) finish(rename []string) (wizResult, tea.Cmd) {
+	c := w.conn()
+	if w.original != "" && w.original != c.Name {
+		if err := w.conns.Rename(w.original, c.Name); err != nil { // keeps the section in place
+			w.saveErr = err.Error()
+			return wizContinue, nil
+		}
+	}
+	c.Dir = ""
+	w.conns.Conn[c.Name] = c
+	if err := config.WriteConnections(w.opts.Connections, w.conns); err != nil {
+		w.saveErr = err.Error()
+		return wizContinue, nil
+	}
+	w.done = statusMsg{Text: "saved: " + c.Name}
+	w.savedName = c.Name
+	if err := renameConn(w.opts.Home, rename, w.original, c.Name); err != nil {
+		w.done = statusMsg{Text: "saved: " + c.Name + "; " + err.Error(), IsErr: true}
+	}
+	return wizDone, nil
+}
+
+// usersOf lists the replications whose source or target is conn.
+func usersOf(home, conn string) []string {
+	files, _ := config.ListReplicationFiles(home)
+	var out []string
+	for _, f := range files {
+		if r, err := config.LoadReplicationRaw(f); err == nil && (r.Source == conn || r.Target == conn) {
+			out = append(out, config.NameOf(f))
+		}
+	}
+	return out
+}
+
+// renameConn points the named replications from one connection name to another.
+func renameConn(home string, reps []string, from, to string) error {
+	var errs []error
+	for _, name := range reps {
+		path, err := config.ReplicationPath(home, name)
+		if err == nil {
+			var r *config.Replication
+			if r, err = config.LoadReplicationRaw(path); err == nil {
+				d := config.DraftOf(r)
+				if d.Source == from {
+					d.Source = to
+				}
+				if d.Target == from {
+					d.Target = to
+				}
+				_, err = config.WriteReplication(home, d)
+			}
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (w *connWizard) view(width, height int) []string {
+	if w.step == connEdit {
+		out := w.form.view(width, height-2)
+		if w.saveErr != "" {
+			out = append(out, "", "  "+sErr.Render(glyphErr+" "+txt.Clean(txt.FirstLine(w.saveErr))))
+		}
+		return out
+	}
+	c := w.conn()
+	out := []string{" " + sTitle.Render(txt.Clean(c.Name)) + "  " + sDim.Render(txt.Clean(c.Type+"  "+c.Target())), ""}
+	switch {
+	case w.probing:
+		out = append(out, "  "+sWarn.Render("◐ connecting"))
+	case w.probe != nil && w.probe.Err != nil:
+		out = append(out, strings.Split(sErrBox.Width(max(width-4, 20)).Render(txt.CleanText(w.probe.Err.Error())), "\n")...)
+	case w.probe != nil:
+		out = append(out, "  "+sOK.Render(glyphOK+" connected")+sDim.Render("  "+txt.Dur(w.probe.Took)))
+		if len(w.probe.Schemas) > 1 {
+			out = append(out, "  "+sDim.Render("schemas  ")+txt.Clean(strings.Join(w.probe.Schemas, ", ")))
+		}
+		if c.Type != "api" {
+			out = append(out, "", "  "+sHeader.Render(plural(len(w.probe.Tables), "table")))
+			shown := w.probe.Tables
+			if room := max(height-9, 0); len(shown) > room {
+				shown = shown[:room]
+			}
+			for _, t := range shown {
+				out = append(out, "    "+txt.Clean(t))
+			}
+			if len(shown) < len(w.probe.Tables) {
+				out = append(out, sDim.Render(fmt.Sprintf("    … %d more", len(w.probe.Tables)-len(shown))))
+			}
+		}
+	}
+	if w.saveErr != "" {
+		out = append(out, "")
+		out = append(out, strings.Split(sErrBox.Width(max(width-4, 20)).Render(txt.CleanText(w.saveErr)), "\n")...)
+	}
+	return out
+}
+
+// ---------- helpers ----------
+
+func helpLine(pairs ...string) string {
+	var parts []string
+	for i := 0; i+1 < len(pairs); i += 2 {
+		parts = append(parts, sKey.Render(pairs[i])+" "+sDim.Render(pairs[i+1]))
+	}
+	return strings.Join(parts, "  ")
+}
+
+func ints(xs []int) string {
+	parts := make([]string, len(xs))
+	for i, x := range xs {
+		parts[i] = strconv.Itoa(x)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func parseInts(s string) ([]int, error) {
+	var out []int
+	for _, p := range splitList(s) {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return nil, fmt.Errorf("%q is not a number", p)
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// parsePairs reads "k = v, k2 = v2".
+func parsePairs(s string) (map[string]string, error) {
+	if strings.TrimSpace(s) == "" {
+		return nil, nil
+	}
+	out := map[string]string{}
+	for _, p := range splitList(s) {
+		k, v, ok := strings.Cut(p, "=")
+		if !ok {
+			return nil, fmt.Errorf("%q: want key = value", p)
+		}
+		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	return out, nil
+}
+
+// pairs writes a map as "k = v, k2 = v2", keys sorted.
+func pairs(m map[string]string) string {
+	var parts []string
+	for k, v := range m {
+		parts = append(parts, k+" = "+v)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ", ")
+}
