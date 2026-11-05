@@ -819,6 +819,23 @@ func (m Model) historyView() []string {
 // planText lays out a dry run: one block per stream.
 func planText(rows []engine.PlanRow, width int) string {
 	var b strings.Builder
+	counts := map[string]int{}
+	var order []string
+	for _, p := range rows {
+		a := p.Action
+		if p.Err != "" {
+			a = "error"
+		}
+		if counts[a] == 0 {
+			order = append(order, a)
+		}
+		counts[a]++
+	}
+	var parts []string
+	for _, a := range order {
+		parts = append(parts, fmt.Sprintf("%d %s", counts[a], a))
+	}
+	b.WriteString(sHeader.Render(plural(len(rows), "stream")) + sDim.Render("   "+strings.Join(parts, "   ")) + "\n\n")
 	for i, p := range rows {
 		if i > 0 {
 			b.WriteString("\n")
@@ -837,7 +854,7 @@ func planText(rows []engine.PlanRow, width int) string {
 		}
 		b.WriteString(ansi.Truncate(head, width, "…") + "\n")
 		for _, l := range strings.Split(strings.TrimSpace(p.SQL), "\n") {
-			b.WriteString("    " + sDim.Render(ansi.Truncate(txt.Clean(l), max(width-4, 10), "…")) + "\n")
+			b.WriteString("    " + sText.Render(ansi.Truncate(txt.Clean(l), max(width-4, 10), "…")) + "\n")
 		}
 	}
 	if len(rows) == 0 {
