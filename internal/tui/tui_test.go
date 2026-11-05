@@ -179,7 +179,7 @@ func TestRunInProcessAndHistory(t *testing.T) {
 	opts := testHome(t)
 	m := loaded(t, opts)
 	rep, _ := m.rep("alpha")
-	cmd := m.runNow(rep, nil)
+	cmd := m.runNow(rep, nil, false)
 	// Batch: status then the run itself. Execute both.
 	var done runDoneMsg
 	var sawStatus bool
@@ -226,7 +226,7 @@ func TestRunInProcessAndHistory(t *testing.T) {
 	config.SetEnabled(rep.Path, true)
 	m = loaded(t, opts)
 	rep, _ = m.rep("beta")
-	for _, msg := range runBatch(t, m.runNow(rep, nil)) {
+	for _, msg := range runBatch(t, m.runNow(rep, nil, false)) {
 		if d, ok := msg.(runDoneMsg); ok && d.Err == nil {
 			t.Fatal("expected failure")
 		}
@@ -256,7 +256,7 @@ func TestRunQueuedWhenDaemonAlive(t *testing.T) {
 		t.Fatalf("badge:\n%s", m.View())
 	}
 	rep, _ := m.rep("alpha")
-	msg := m.runNow(rep, []string{"things"})()
+	msg := m.runNow(rep, []string{"things"}, false)()
 	if s, ok := msg.(statusMsg); !ok || !strings.Contains(s.Text, "queued: alpha (things)") {
 		t.Fatalf("%+v", msg)
 	}

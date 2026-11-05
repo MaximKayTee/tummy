@@ -275,7 +275,7 @@ func TestEnterShowsTargetData(t *testing.T) {
 	opts := testHome(t)
 	m := loaded(t, opts)
 	rep, _ := m.rep("alpha")
-	for range runBatch(t, m.runNow(rep, nil)) {
+	for range runBatch(t, m.runNow(rep, nil, false)) {
 	}
 	m = loaded(t, opts)
 	m = press(m, "enter", "enter") // alpha › things › data

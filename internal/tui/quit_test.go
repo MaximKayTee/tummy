@@ -116,7 +116,7 @@ func TestDetachedRun(t *testing.T) {
 	opts.RunCommand = []string{"sh", "-c", `[ "$1" = alpha ] && [ "$2" = --streams ] && [ "$3" = things ] && echo ran >&2`, "tummy"}
 	m := loaded(t, opts)
 	rep, _ := m.rep("alpha")
-	mm, cmd := m.startRun(rep, []string{"things"})
+	mm, cmd := m.startRun(rep, []string{"things"}, true)
 	m = mm.(Model)
 	if !m.inflight["alpha"] || len(m.cancels) != 0 {
 		t.Fatal("detached run: inflight, nothing to cancel")
@@ -141,7 +141,7 @@ func TestDetachedRun(t *testing.T) {
 	// a failing child reports without stopping the TUI
 	opts.RunCommand = []string{"sh", "-c", "exit 3", "tummy"}
 	m = loaded(t, opts)
-	_, cmd = m.startRun(rep, nil)
+	_, cmd = m.startRun(rep, nil, true)
 	for _, msg := range runBatch(t, cmd) {
 		if d, ok := msg.(runDoneMsg); ok && d.Err == nil {
 			t.Fatal("exit 3 should report an error")

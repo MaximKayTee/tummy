@@ -291,9 +291,9 @@ func joinFooter(left, right string, width int) string {
 func (m Model) shortHelp() string {
 	switch m.view {
 	case viewList:
-		return helpLine("enter", "open", "n", "new", "E", "edit", "D", "duplicate", "r", "run", "t", "dry run", "e", "on/off", "d", "delete", "c", "connections", "H", "history", "/", "filter")
+		return helpLine("enter", "open", "n", "new", "E", "edit", "D", "duplicate", "r", "run", "ctrl+r", "run detached", "t", "dry run", "e", "on/off", "d", "delete", "c", "connections", "H", "history", "/", "filter")
 	case viewDetail:
-		pairs := []string{"E", "edit", "a", "add", "r", "run", "t", "dry run", "s", "run stream", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
+		pairs := []string{"E", "edit", "a", "add", "r", "run", "ctrl+r", "run detached", "t", "dry run", "s", "run stream", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
 		if rep, ok := m.rep(m.repName); ok && rep.Running > 0 {
 			pairs = append(pairs, "x", "cancel run")
 		}
@@ -374,12 +374,12 @@ func (m Model) helpPages() []helpPage {
 	case viewList:
 		section("replications", [][2]string{
 			{"enter", "streams of the replication"}, {"n", "new replication"}, {"E", "edit"}, {"D", "duplicate: a new replication with its streams and defaults"}, {"e", "on/off for the daemon"},
-			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"t", "dry run: target table, action, source query and columns per stream, nothing written"}, {"x", "cancel a running run (y/n)"}, {"H", "run history"}, {"c", "connections"},
+			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"ctrl+r", "run now as its own process; survives quitting the TUI"}, {"t", "dry run: target table, action, source query and columns per stream, nothing written"}, {"x", "cancel a running run (y/n)"}, {"H", "run history"}, {"c", "connections"},
 		})
 	case viewDetail:
 		section("streams", [][2]string{
 			{"enter", "loaded data in the target; a failed stream: its run"}, {"p", "source preview"}, {"E", "edit the stream"}, {"a", "add tables or an endpoint"},
-			{"e", "stream on/off; (replication): the replication"}, {"d", "delete the stream (y/n)"}, {"r", "run every stream"}, {"s", "run the stream"},
+			{"e", "stream on/off; (replication): the replication"}, {"d", "delete the stream (y/n)"}, {"r", "run every stream"}, {"ctrl+r", "run every stream as its own process; survives quitting the TUI"}, {"s", "run the stream"},
 			{"x", "cancel the run (y/n)"}, {"H", "history of the stream"},
 		})
 	case viewHistory:

@@ -651,7 +651,7 @@ func (m Model) handleKeyInner(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.repName, m.streamName, m.view = rep.Name, "", viewDetail
 				m.cursor[viewDetail], m.offset[viewDetail] = 0, 0
 			}
-			return m.startRun(rep, streams)
+			return m.startRun(rep, streams, false)
 		case key.Matches(msg, keys.Test) && m.planName != "" && !m.planning:
 			rep, ok := m.rep(m.planName)
 			if !ok {
@@ -716,7 +716,9 @@ func (m Model) keyList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.offset[viewDetail] = 0
 		return m, nil
 	case key.Matches(msg, keys.Run) && ok:
-		return m.startRun(cur, nil)
+		return m.startRun(cur, nil, false)
+	case key.Matches(msg, keys.RunDetached) && ok:
+		return m.startRun(cur, nil, true)
 	case key.Matches(msg, keys.Test) && ok:
 		return m.startPlan(cur)
 	case key.Matches(msg, keys.Toggle) && ok:
@@ -775,11 +777,13 @@ func (m Model) keyDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor[viewHistory] = 0
 		return m, m.loadRuns(m.repName, m.streamName)
 	case key.Matches(msg, keys.Run):
-		return m.startRun(rep, nil)
+		return m.startRun(rep, nil, false)
+	case key.Matches(msg, keys.RunDetached):
+		return m.startRun(rep, nil, true)
 	case key.Matches(msg, keys.Test):
 		return m.startPlan(rep)
 	case key.Matches(msg, keys.RunStream) && hasStream && stream != "*":
-		return m.startRun(rep, []string{stream})
+		return m.startRun(rep, []string{stream}, false)
 	case key.Matches(msg, keys.Toggle):
 		switch {
 		case !hasStream || (stream == "*" && !inFile):
@@ -949,17 +953,22 @@ func (m Model) keyConns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) startRun(rep replication, streams []string) (tea.Model, tea.Cmd) {
+// startRun runs rep in this process, or detached as its own process that outlives
+// the TUI (ctrl+r) when Options.RunCommand is set.
+func (m Model) startRun(rep replication, streams []string, detached bool) (tea.Model, tea.Cmd) {
 	if m.inflight[rep.Name] {
 		return m, status(rep.Name+": running", true)
 	}
 	if rep.Err != "" || rep.ConnErr != "" { // refused before anything is marked
-		return m, m.runNow(rep, streams)
+		return m, m.runNow(rep, streams, detached)
+	}
+	if detached && len(m.opts.RunCommand) == 0 {
+		return m, status("detached runs need the tummy command", true)
 	}
 	if !m.daemonServes() {
 		m.inflight[rep.Name] = true
 	}
-	return m, m.runNow(rep, streams)
+	return m, m.runNow(rep, streams, detached)
 }
 
 func (m Model) back() Model {

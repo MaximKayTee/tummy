@@ -89,7 +89,7 @@ func (m Model) daemonServes() bool {
 }
 
 // runNow queues a run with the daemon when one serves this home, else runs in this process.
-func (m Model) runNow(rep replication, streams []string) tea.Cmd {
+func (m Model) runNow(rep replication, streams []string, detached bool) tea.Cmd {
 	if rep.Err != "" {
 		return status(rep.Name+": "+txt.FirstLine(rep.Err), true)
 	}
@@ -107,8 +107,8 @@ func (m Model) runNow(rep replication, streams []string) tea.Cmd {
 			return statusMsg{Text: "queued: " + runLabel(rep.Name, streams)}
 		}
 	}
-	if len(opts.RunCommand) > 0 {
-		return tea.Batch(status("running: "+runLabel(rep.Name, streams), false), m.runDetached(rep, streams))
+	if detached {
+		return tea.Batch(status("running detached: "+runLabel(rep.Name, streams), false), m.runDetached(rep, streams))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	if m.cancels != nil {
