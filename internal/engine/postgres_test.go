@@ -383,7 +383,7 @@ func TestPostgresPlanSample(t *testing.T) {
 	for _, p := range rows {
 		by[p.Stream] = p
 	}
-	if s := by["notes"].Sample; s == nil || !strings.Contains(s.Err, "row 2, column v") || !strings.Contains(s.Err, "invalid byte sequence") || s.Rows != 1 {
+	if s := by["notes"].Sample; s == nil || s.Err != "" || s.Rows != 2 { // invalid UTF-8 is repaired on load
 		t.Fatalf("notes sample: %+v", s)
 	}
 	if s := by["good"].Sample; s == nil || s.Err != "" || s.Rows != 2 {

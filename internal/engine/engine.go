@@ -13,6 +13,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -474,19 +475,22 @@ func (e *Engine) runStream(ctx context.Context, r *config.Replication, tgt *db.D
 	lastProgress := time.Now()
 	var n int64
 	e.phase(ctx, runID, s, res.Object, PhaseLoading, 0)
+	rows, stopReading := readAhead(src)
+	defer stopReading()
 	for {
 		if err := ctx.Err(); err != nil {
 			res.Err = err
 			return
 		}
-		row, err := src.next()
-		if err != nil {
-			res.Err = fmt.Errorf("read %s: %w", s.Name, err)
-			return
-		}
-		if row == nil {
+		rr, ok := <-rows
+		if !ok {
 			break
 		}
+		if rr.err != nil {
+			res.Err = fmt.Errorf("read %s: %w", s.Name, rr.err)
+			return
+		}
+		row := rr.row
 		n++
 		if err := ins.Add(ctx, sh.extend(row, loadedAt, n)); err != nil {
 			res.Err = err
@@ -563,6 +567,42 @@ func (sh shape) extend(row []any, loadedAt time.Time, n int64) []any {
 		row = append(row, n)
 	}
 	return row
+}
+
+type readRow struct {
+	row []any
+	err error
+}
+
+// readAhead reads src on its own goroutine so the source is read while the target
+// is written. The channel closes after the last row or an error. stop ends the
+// reading early; the caller still closes src.
+func readAhead(src *rowSource) (<-chan readRow, func()) {
+	out := make(chan readRow, 4096)
+	done := make(chan struct{})
+	go func() {
+		defer close(out)
+		for {
+			row, err := src.next()
+			if err != nil {
+				select {
+				case out <- readRow{err: err}:
+				case <-done:
+				}
+				return
+			}
+			if row == nil {
+				return
+			}
+			select {
+			case out <- readRow{row: row}:
+			case <-done:
+				return
+			}
+		}
+	}()
+	var once sync.Once
+	return out, func() { once.Do(func() { close(done) }) }
 }
 
 // watchCancel returns a context that ends when State.Cancel is called for runID, with

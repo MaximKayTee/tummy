@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -445,8 +446,21 @@ func (mssql) Derived(sql string) string {
 }
 
 // driver uses the azuread wrapper: plain logins pass through, fedauth= selects Entra.
-func (mssql) driver(p Params) (string, string, error) { return azuread.DriverName, p.URL, nil }
-func (mssql) maxOpenConns() int                       { return 0 }
+// driver passes the URL through, with the largest TDS packet size unless the URL sets
+// one: the driver's 4 KiB default makes a round trip per few rows on bulk reads.
+func (mssql) driver(p Params) (string, string, error) {
+	u, err := url.Parse(p.URL)
+	if err != nil {
+		return azuread.DriverName, p.URL, nil
+	}
+	q := u.Query()
+	if !q.Has("packet size") {
+		q.Set("packet size", "32767")
+		u.RawQuery = q.Encode()
+	}
+	return azuread.DriverName, u.String(), nil
+}
+func (mssql) maxOpenConns() int { return 0 }
 
 // ---------- sqlite ----------
 
