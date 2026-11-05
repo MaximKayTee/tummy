@@ -491,7 +491,7 @@ func (e *stepEditor) build() (steps.Step, error) {
 	case "set":
 		return e.setResult()
 	case "filter":
-		if f.get("mode") == "raw" {
+		if f.get("mode") == "sql" {
 			return steps.Step{Op: "filter", Args: f.get("expr")}, nil
 		}
 		cond, err := e.filterSpec().sql(e.ctx.dl)
@@ -787,12 +787,12 @@ func (e *stepEditor) filterForm(args string) *form {
 	if args != "" {
 		spec, ok = parseFilter(args, e.cols, kinds, e.ctx.dl)
 	}
-	mode := "guided"
+	mode := "pick"
 	if !ok {
-		mode = "raw"
+		mode = "sql"
 	}
-	guided := func(f *form) bool { return f.get("mode") == "guided" }
-	raw := func(f *form) bool { return f.get("mode") == "raw" }
+	guided := func(f *form) bool { return f.get("mode") == "pick" }
+	raw := func(f *form) bool { return f.get("mode") == "sql" }
 	needsValue := func(f *form) bool {
 		o := f.get("op")
 		return guided(f) && o != "is null" && o != "is not null"
@@ -807,7 +807,7 @@ func (e *stepEditor) filterForm(args string) *form {
 	e.lastCol = col
 	keep := spec.keepNulls || args == "" || !ok
 	f := newForm("filter rows",
-		choice("mode", "Mode", "", "guided", "raw").def(mode),
+		choice("mode", "Mode", "", "pick", "sql").def(mode),
 		choice("col", "Column", "", e.cols...).def(col).when(guided),
 		choice("op", "Is", "", opsFor(kinds[col])...).def(cmpOr(spec.op, "=")).when(guided).notes(opNotes),
 		multi("val", "Value", "", e.valueItems(col), spec.vals).when(needsValue).required(),

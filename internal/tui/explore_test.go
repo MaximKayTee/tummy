@@ -862,7 +862,7 @@ func TestGuidedFilterEditor(t *testing.T) {
 	ctx := stepContext{dl: d, cols: []db.Column{{Name: "id", Kind: db.Int}, {Name: "city"}, {Name: "total", Kind: db.Float}, {Name: "bad|name"}},
 		rows: [][]any{{int64(1), "Oslo", 2.5, "x"}, {int64(2), nil, 3.0, "y"}, {int64(3), "Rome", nil, "z"}}}
 	ed := newStepEditor("filter", ctx, nil)
-	if ed.form.get("mode") != "guided" || ed.form.get("col") != "id" {
+	if ed.form.get("mode") != "pick" || ed.form.get("col") != "id" {
 		t.Fatal("default is guided on the first column")
 	}
 	if opts := ed.form.field("col").Options; len(opts) != 3 {
@@ -921,7 +921,7 @@ func TestGuidedFilterEditor(t *testing.T) {
 		t.Fatalf("is null: %s", ed.result)
 	}
 	ed = newStepEditor("filter", ctx, &steps.Step{Op: "filter", Args: `"total" > 10 and "id" = 1`})
-	if ed.form.get("mode") != "raw" || ed.form.get("expr") != `"total" > 10 and "id" = 1` {
+	if ed.form.get("mode") != "sql" || ed.form.get("expr") != `"total" > 10 and "id" = 1` {
 		t.Fatal("compound condition opens raw")
 	}
 	// != keeps nulls unless switched off
