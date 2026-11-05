@@ -151,9 +151,12 @@ func (m Model) daemonBadge() string {
 	return sDim.Render("○ no daemon")
 }
 
+// statusFor is how long a status line replaces the key hints.
+const statusFor = 4 * time.Second
+
 func (m Model) footer() []string {
 	var left, right string
-	recent := time.Since(m.statusAt) < 8*time.Second && m.status.Text != ""
+	recent := time.Since(m.statusAt) < statusFor && m.status.Text != ""
 	statusLine := func() string {
 		if m.status.IsErr {
 			return sErr.Render(txt.Clean(m.status.Text))

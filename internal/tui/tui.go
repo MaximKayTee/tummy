@@ -774,9 +774,6 @@ func (m Model) askCancel(rep replication) Model {
 // openRun shows one run; esc goes back to the current view.
 // startPlan opens the run page at once, resolving shown until the plan arrives.
 func (m Model) startPlan(rep replication) (tea.Model, tea.Cmd) {
-	if rep.Err != "" || rep.ConnErr != "" {
-		return m, m.planNow(rep)
-	}
 	m.run, m.runFrom, m.planName = state.Run{Replication: rep.Name, Stream: "*"}, m.view, rep.Name
 	m.planning, m.planStart = true, time.Now()
 	m.view = viewRun

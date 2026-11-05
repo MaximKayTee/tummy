@@ -104,6 +104,7 @@ type explorer struct {
 	fetchErr string
 	note     string
 	noteErr  bool
+	noteAt   time.Time // notes fade after noteFor
 	took     time.Duration
 	sqlInput textarea.Model
 	editSQL  bool

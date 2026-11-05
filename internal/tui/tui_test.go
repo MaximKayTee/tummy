@@ -419,3 +419,33 @@ func TestControlRunesDropped(t *testing.T) {
 		t.Fatal("a lone NUL should do nothing")
 	}
 }
+
+func TestDryRunFromDetailAndBrokenRep(t *testing.T) {
+	opts := testHome(t)
+	m := loaded(t, opts)
+	m = press(m, "enter") // alpha's detail view
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = mm.(Model)
+	if m.view != viewRun || !m.planning || cmd == nil {
+		t.Fatalf("t on the detail view: view %d planning %v", m.view, m.planning)
+	}
+	// a replication with a config error still gets the page, with the error on it
+	os.WriteFile(filepath.Join(config.ReplicationsDir(opts.Home), "broken.toml"), []byte("source = \"SRC\"\ntarget = \"NOPE\"\n[streams.things]\n"), 0o644)
+	m = loaded(t, opts)
+	for i, r := range m.snap.Reps {
+		if r.Name == "broken" {
+			m.cursor[viewList] = i
+		}
+	}
+	mm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = mm.(Model)
+	for _, msg := range runBatch(t, cmd) {
+		if p, ok := msg.(planMsg); ok {
+			mm, _ = m.Update(p)
+			m = mm.(Model)
+		}
+	}
+	if m.view != viewRun || m.planning || !strings.Contains(m.View(), "NOPE") {
+		t.Fatalf("broken replication: view %d planning %v\n%s", m.view, m.planning, m.View())
+	}
+}

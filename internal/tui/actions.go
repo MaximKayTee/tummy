@@ -41,10 +41,10 @@ type planMsg struct {
 // planNow resolves the replication against its connections without writing.
 func (m Model) planNow(rep replication) tea.Cmd {
 	if rep.Err != "" {
-		return status(rep.Name+": "+txt.FirstLine(rep.Err), true)
+		return func() tea.Msg { return planMsg{Replication: rep.Name, Err: errors.New(rep.Err)} }
 	}
 	if rep.ConnErr != "" {
-		return status(rep.Name+": "+rep.ConnErr, true)
+		return func() tea.Msg { return planMsg{Replication: rep.Name, Err: errors.New(rep.ConnErr)} }
 	}
 	opts := m.opts
 	return tea.Batch(status("dry run: "+rep.Name, false), func() tea.Msg {

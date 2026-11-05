@@ -441,7 +441,18 @@ func (e *explorer) applyPreview(msg previewMsg) tea.Cmd {
 	return e.showCmd()
 }
 
-func (e *explorer) setNote(s string, isErr bool) { e.note, e.noteErr = s, isErr }
+// noteFor is how long a note stays; errors stay until the next action.
+const noteFor = 5 * time.Second
+
+func (e *explorer) setNote(s string, isErr bool) { e.note, e.noteErr, e.noteAt = s, isErr, time.Now() }
+
+// currentNote is the note while it is fresh; an error note does not fade.
+func (e *explorer) currentNote() string {
+	if e.note == "" || (!e.noteErr && time.Since(e.noteAt) > noteFor) {
+		return ""
+	}
+	return e.note
+}
 
 // ---------- preview keys ----------
 
@@ -700,12 +711,12 @@ func (e *explorer) previewView(width, height int) []string {
 	} else if e.spec.SQL != "" {
 		out = append(out, " "+sDim.Render(ansi.Truncate("sql› "+txt.Clean(txt.FirstLine(e.spec.SQL)), width-2, "…")))
 	}
-	if e.note != "" {
+	if note := e.currentNote(); note != "" {
 		style := sDim
 		if e.noteErr {
 			style = sErr
 		}
-		lines := strings.Split(ansi.Wrap(txt.CleanText(e.note), max(width-2, 10), " "), "\n")
+		lines := strings.Split(ansi.Wrap(txt.CleanText(note), max(width-2, 10), " "), "\n")
 		for _, l := range lines[:min(len(lines), 3)] {
 			out = append(out, " "+style.Render(l))
 		}
