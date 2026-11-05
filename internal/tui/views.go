@@ -853,7 +853,7 @@ func (m Model) connsView() []string {
 	if len(conns) == 0 {
 		return []string{"", sDim.Render("  none")}
 	}
-	cols := []column{{Title: "NAME"}, {Title: "TYPE", Width: 9}, {Title: "URL"}, {Title: "TEST"}}
+	cols := []column{{Title: "NAME"}, {Title: "TYPE", Width: 12}, {Title: "URL"}, {Title: "TEST"}}
 	var rows [][]string
 	for _, c := range conns {
 		test := ""
@@ -871,7 +871,11 @@ func (m Model) connsView() []string {
 				}
 			}
 		}
-		rows = append(rows, []string{txt.Clean(c.Name), sDim.Render(txt.Clean(c.Type)), sDim.Render(txt.Clean(c.Target)), test})
+		typ := c.Type
+		if c.ReadOnly {
+			typ += " ro"
+		}
+		rows = append(rows, []string{txt.Clean(c.Name), sDim.Render(txt.Clean(typ)), sDim.Render(txt.Clean(c.Target)), test})
 	}
 	out := table(m.width, cols, rows, m.cursor[viewConns])
 	if cur, ok := at(conns, m.cursor[viewConns]); ok && !m.testing[cur.Name] {

@@ -156,6 +156,9 @@ func (e *Engine) run(ctx context.Context, r *config.Replication, only []string) 
 	if err != nil {
 		return nil, err
 	}
+	if tgtConn.ReadOnly {
+		return nil, fmt.Errorf("conn %s: read_only, not a target", r.Target)
+	}
 	e.emit(Event{Phase: PhaseConnecting, Object: r.Target})
 	tp := tgtConn.DB()
 	tp.Create = true // a new sqlite target

@@ -219,6 +219,7 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 			}
 			return optionExamples[f.get("type")] + "   driver parameters"
 		}),
+		toggle("read_only", "Read only", "never a target", c.ReadOnly).when(func(f *form) bool { return !isAPI(f) }),
 		combo("schema", "Schema", "for unqualified table names; ctrl+g lists them", "").empty("default").eg("public   dbo").def(c.Schema).when(isDB),
 		text("path", "Path", "relative to "+dir).eg("shop.db").def(c.Path).when(func(f *form) bool { return f.get("type") == "sqlite" }).required(),
 		text("base_url", "Base URL", "stream paths are appended").eg("https://api.example.com/v1").def(c.BaseURL).when(isAPI).required(),
@@ -315,6 +316,7 @@ func (w *connWizard) conn() *config.Conn {
 	c.Dir = filepath.Dir(w.opts.Connections)
 	c.URL, c.Schema, c.Path, c.BaseURL, c.Auth = "", "", "", "", ""
 	c.Token, c.Header, c.Param, c.User, c.Password, c.RateLimit, c.RetryOn = "", "", "", "", "", "", nil
+	c.ReadOnly = c.Type != "api" && f.on("read_only")
 	switch c.Type {
 	case "sqlite":
 		c.Path = f.get("path")

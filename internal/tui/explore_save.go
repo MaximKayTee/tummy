@@ -182,7 +182,7 @@ func (e *explorer) toTargetPick() tea.Cmd {
 	}
 	var targets []string
 	for _, n := range e.conns.Names() {
-		if e.conns.Conn[n].Type != "api" {
+		if c := e.conns.Conn[n]; c.Type != "api" && !c.ReadOnly {
 			targets = append(targets, n) // the source too: a copy into another schema
 		}
 	}

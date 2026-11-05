@@ -18,12 +18,13 @@ import (
 
 // Conn is one entry in connections.toml.
 type Conn struct {
-	Name   string `toml:"-"`
-	Dir    string `toml:"-"` // directory of connections.toml: relative sqlite paths resolve against it
-	Type   string `toml:"type"`
-	URL    string `toml:"url"`
-	Path   string `toml:"path"`
-	Schema string `toml:"schema"`
+	Name     string `toml:"-"`
+	Dir      string `toml:"-"` // directory of connections.toml: relative sqlite paths resolve against it
+	Type     string `toml:"type"`
+	URL      string `toml:"url"`
+	Path     string `toml:"path"`
+	Schema   string `toml:"schema"`
+	ReadOnly bool   `toml:"read_only"` // never a target
 
 	// api
 	BaseURL   string `toml:"base_url"`

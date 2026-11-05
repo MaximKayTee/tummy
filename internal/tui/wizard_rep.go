@@ -207,7 +207,8 @@ func newEditStreamWizard(opts Options, conns *config.Connections, name, stream s
 func (w *repWizard) connNames(apiToo bool) []string {
 	var out []string
 	for _, n := range w.conns.Names() {
-		if apiToo || w.conns.Conn[n].Type != "api" {
+		c := w.conns.Conn[n]
+		if apiToo || (c.Type != "api" && !c.ReadOnly) {
 			out = append(out, n)
 		}
 	}
@@ -219,6 +220,9 @@ func connNotes(conns *config.Connections) map[string]string {
 	out := map[string]string{}
 	for n, c := range conns.Conn {
 		out[n] = strings.TrimSpace(fmt.Sprintf("%-8s  %s", c.Type, c.Target()))
+		if c.ReadOnly {
+			out[n] += "  read only"
+		}
 	}
 	return out
 }

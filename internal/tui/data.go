@@ -52,6 +52,7 @@ type connRow struct {
 	Schema    string
 	Missing   string // sqlite: the file, when it does not exist
 	Err       string // config error: the row is listed so it can be edited
+	ReadOnly  bool
 }
 
 type snapshot struct {
@@ -221,7 +222,7 @@ func (m Model) loadSnapshot() tea.Cmd {
 		if err == nil {
 			for _, n := range conns.Names() {
 				c := conns.Conn[n]
-				snap.Conns = append(snap.Conns, connRow{Name: n, Type: c.Type, Target: c.Target(), RateLimit: c.RateLimit, Schema: c.Schema, Missing: missingFile(c)})
+				snap.Conns = append(snap.Conns, connRow{Name: n, Type: c.Type, Target: c.Target(), RateLimit: c.RateLimit, Schema: c.Schema, Missing: missingFile(c), ReadOnly: c.ReadOnly})
 			}
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			// a connection that fails its check is listed with the error; a file that does not parse is one row
@@ -232,7 +233,7 @@ func (m Model) loadSnapshot() tea.Cmd {
 			}
 			for _, n := range raw.Names() {
 				c := raw.Conn[n]
-				row := connRow{Name: n, Type: c.Type, Target: c.Target(), RateLimit: c.RateLimit, Schema: c.Schema}
+				row := connRow{Name: n, Type: c.Type, Target: c.Target(), RateLimit: c.RateLimit, Schema: c.Schema, ReadOnly: c.ReadOnly}
 				if cerr := c.Check(); cerr != nil {
 					row.Err = strings.TrimPrefix(cerr.Error(), "conn "+n+": ")
 				}

@@ -1276,3 +1276,27 @@ func formErrs(f *form) map[string]string {
 	}
 	return out
 }
+
+func TestReadOnlyConnNotATarget(t *testing.T) {
+	opts := testHome(t)
+	conns, _ := config.LoadConnectionsRaw(opts.Connections)
+	conns.Conn["PG"].ReadOnly = true
+	if err := config.WriteConnections(opts.Connections, conns); err != nil {
+		t.Fatal(err)
+	}
+	conns, _ = config.LoadConnections(opts.Connections)
+	if !conns.Conn["PG"].ReadOnly {
+		t.Fatal("read_only not written")
+	}
+	w, err := newRepWizard(opts, conns, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(w.basics.field("target").Options, "PG") || !slices.Contains(w.basics.field("source").Options, "PG") {
+		t.Fatalf("source %v target %v", w.basics.field("source").Options, w.basics.field("target").Options)
+	}
+	cw, _ := newConnWizard(opts, "PG")
+	if !cw.form.on("read_only") {
+		t.Fatal("form toggle off")
+	}
+}

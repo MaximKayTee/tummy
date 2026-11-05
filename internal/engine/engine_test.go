@@ -716,3 +716,12 @@ select = ["-total", "-updated_at"]
 		t.Fatalf("base query: %v %s", err, q)
 	}
 }
+
+func TestReadOnlyTargetRefused(t *testing.T) {
+	f := setup(t)
+	f.conns.Conn["TGT"].ReadOnly = true
+	r := f.replication("source = \"SRC\"\ntarget = \"TGT\"\n[streams.orders]\n")
+	if _, err := f.engine().Run(context.Background(), r, nil); err == nil || !strings.Contains(err.Error(), "read_only") {
+		t.Fatalf("read-only target accepted: %v", err)
+	}
+}
