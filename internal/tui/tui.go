@@ -421,6 +421,9 @@ func (m Model) deleteConn(name string) tea.Cmd {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+z" {
+		return m, tea.Suspend
+	}
 	before := m.view
 	next, cmd := m.handleKeyInner(msg)
 	if nm, ok := next.(Model); ok && nm.view != before && before != viewWizard && nm.view != viewWizard {

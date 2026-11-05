@@ -356,7 +356,7 @@ func (m Model) helpPages() []helpPage {
 		if kh, ok := m.wiz.(keyHelper); ok {
 			section(kh.keyHelp())
 		}
-		section("anywhere", [][2]string{{"f1", "help"}, {"?", "help, when not typing"}, {"ctrl+c", "quit; asks when there are changes or runs"}})
+		section("anywhere", [][2]string{{"f1", "help"}, {"?", "help, when not typing"}, {"ctrl+c", "quit; asks when there are changes or runs"}, {"ctrl+z", "suspend; fg resumes"}})
 	case viewList:
 		section("replications", [][2]string{
 			{"enter", "streams of the replication"}, {"n", "new replication"}, {"E", "edit"}, {"e", "on/off for the daemon"},
