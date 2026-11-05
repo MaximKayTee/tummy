@@ -341,7 +341,7 @@ func TestPreviewWrite(t *testing.T) {
 
 func TestURLRoundTrip(t *testing.T) {
 	for _, raw := range []string{
-		"postgres://user:${PG_PASS}@host:5432/db?sslmode=disable",
+		"postgres://user:${PG_PASS}@host:5432/db?sslmode=require",
 		"mysql://user:p%40ss@host/db",
 		"sqlserver://user:${MSSQL_PASS}@host:1433?database=db",
 		"sqlserver://app%40tenant:secret@host/INST?database=db&fedauth=ActiveDirectoryServicePrincipal",

@@ -197,7 +197,12 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 		secret("password", "Password", "${VAR}: environment").eg("${DB_PASS}").def(parts.Password).when(func(f *form) bool {
 			return (fields(f) && !noPassword(f.get("fedauth"))) || authIs("basic")(f)
 		}),
-		text("options", "Options", "driver parameters").eg(optionExamples).def(pairs(queryPairs(parts.Query))).when(fields).check(checkPairs),
+		text("options", "Options", "driver parameters").def(pairs(queryPairs(parts.Query))).when(fields).check(checkPairs).helpFn(func(f *form) string {
+			if f.get("options") != "" {
+				return "driver parameters"
+			}
+			return optionExamples[f.get("type")] + "   driver parameters"
+		}),
 		combo("schema", "Schema", "for unqualified table names; ctrl+g lists them", "").empty("default").eg("public   dbo").def(c.Schema).when(isDB),
 		text("path", "Path", "relative to "+dir).eg("shop.db").def(c.Path).when(func(f *form) bool { return f.get("type") == "sqlite" }).required(),
 		text("base_url", "Base URL", "stream paths are appended").eg("https://api.example.com/v1").def(c.BaseURL).when(isAPI).required(),
@@ -630,7 +635,11 @@ func pairs(m map[string]string) string {
 	return strings.Join(parts, ", ")
 }
 
-const optionExamples = "sslmode = disable   encrypt = disable, trustservercertificate = true"
+var optionExamples = map[string]string{
+	"postgres": "sslmode = require",
+	"mysql":    "tls = true",
+	"mssql":    "encrypt = true",
+}
 
 // queryPairs flattens a query to its first values, fedauth left out: the Auth field holds it.
 func queryPairs(q url.Values) map[string]string {

@@ -21,7 +21,7 @@ var urlSchemes = map[string][]string{
 
 // URLExample is the url shape for a type.
 var URLExample = map[string]string{
-	"postgres": "postgres://user:${PG_PASS}@host:5432/db?sslmode=disable",
+	"postgres": "postgres://user:${PG_PASS}@host:5432/db?sslmode=require",
 	"mysql":    "mysql://user:${MYSQL_PASS}@host:3306/db",
 	"mssql":    "sqlserver://user:${MSSQL_PASS}@host:1433?database=db",
 }
