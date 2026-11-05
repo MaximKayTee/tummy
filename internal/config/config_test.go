@@ -217,3 +217,21 @@ func TestSqlitePathRelativeToConfigDir(t *testing.T) {
 		t.Fatal("raw loader must keep the relative path")
 	}
 }
+
+func TestControlCharactersRejected(t *testing.T) {
+	st := &Stream{Mode: "full-refresh", Where: "id > 1\x00"}
+	if err := ValidateStream("orders", st); err == nil || !strings.Contains(err.Error(), "control character") {
+		t.Fatalf("where with NUL: %v", err)
+	}
+	st = &Stream{Mode: "full-refresh", SQL: "select 1\nfrom t", Object: "x"}
+	if err := ValidateStream("q", st); err != nil {
+		t.Fatalf("newline in sql is fine: %v", err)
+	}
+	if err := ValidateStream("dbo.Orders\x00", &Stream{Mode: "full-refresh"}); err == nil {
+		t.Fatal("name with NUL accepted")
+	}
+	c := &Conn{Name: "X", Type: "postgres", URL: "postgres://u@h/db", Schema: "raw\x00"}
+	if err := c.Check(); err == nil || !strings.Contains(err.Error(), "schema") {
+		t.Fatalf("schema with NUL: %v", err)
+	}
+}

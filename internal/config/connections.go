@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -157,6 +158,9 @@ func (c *Conn) check() error {
 	set := func(s string) bool { return s != "" && !hasEnvRef(s) }
 	if c.Type == "" {
 		return fail(`type is required: postgres, mysql, mssql, sqlite or api`)
+	}
+	if err := checkControls(reflect.ValueOf(*c)); err != nil {
+		return fail("%v", err)
 	}
 	if hasEnvRef(c.Type) {
 		return fail("type cannot use ${VAR}")

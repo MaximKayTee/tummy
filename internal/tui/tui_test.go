@@ -405,3 +405,17 @@ func TestDryRunPage(t *testing.T) {
 		t.Fatalf("r from the plan: view %d rep %q", m.view, m.repName)
 	}
 }
+
+func TestControlRunesDropped(t *testing.T) {
+	m := loaded(t, testHome(t))
+	m = press(m, "/")
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("al\x00pha")})
+	m = mm.(Model)
+	if got := m.filter.Value(); got != "alpha" {
+		t.Fatalf("filter %q", got)
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{0}})
+	if mm.(Model).filter.Value() != "alpha" {
+		t.Fatal("a lone NUL should do nothing")
+	}
+}

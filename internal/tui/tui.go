@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -263,6 +264,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyMsg:
+		if msg.Type == tea.KeyRunes { // a web terminal can send NUL and other control bytes as text
+			msg.Runes = slices.DeleteFunc(slices.Clone(msg.Runes), func(r rune) bool { return r < 0x20 || r == 0x7f })
+			if len(msg.Runes) == 0 {
+				return m, nil
+			}
+		}
 		return m.handleKey(msg)
 	}
 	if m.wiz != nil {

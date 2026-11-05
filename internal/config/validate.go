@@ -152,11 +152,44 @@ func ValidateStream(name string, s *Stream) error {
 	return validateStream(name, s, false)
 }
 
+// controlIn is the first control character of s. Newlines and tabs are allowed in
+// multi-line values. A NUL from a terminal hides in a name and only fails on the database.
+func controlIn(s string, multiline bool) (rune, bool) {
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f {
+			if multiline && (r == '\n' || r == '\t' || r == '\r') {
+				continue
+			}
+			return r, true
+		}
+	}
+	return 0, false
+}
+
+// checkControls rejects control characters in the string fields of v, a struct.
+func checkControls(v reflect.Value, multiline ...string) error {
+	for _, f := range fieldsOf(v) {
+		if f.v.Kind() != reflect.String {
+			continue
+		}
+		if r, ok := controlIn(f.v.String(), slices.Contains(multiline, f.key)); ok {
+			return fmt.Errorf("%s: control character %U in the value", f.key, r)
+		}
+	}
+	return nil
+}
+
 func validateStream(name string, s *Stream, raw bool) error {
 	fail := func(format string, args ...any) error {
 		return fmt.Errorf("stream %s: "+format, append([]any{name}, args...)...)
 	}
 	check := func(v string) bool { return v != "" && !(raw && hasEnvRef(v)) }
+	if r, ok := controlIn(name, false); ok {
+		return fail("control character %U in the name", r)
+	}
+	if err := checkControls(reflect.ValueOf(*s), "sql", "steps", "body"); err != nil {
+		return fail("%v", err)
+	}
 	if !contains(Modes, s.Mode) {
 		return fail("unknown mode %q (%s)", s.Mode, orList(Modes))
 	}

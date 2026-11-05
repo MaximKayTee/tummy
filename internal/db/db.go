@@ -84,7 +84,7 @@ func (d *DB) TableExists(ctx context.Context, t Table) (bool, error) {
 	q, args := d.Dialect.TableExists(t, d.Schema)
 	var n int
 	if err := d.QueryRowContext(ctx, q, args...).Scan(&n); err != nil {
-		return false, fmt.Errorf("%s: %w", d.Name, err)
+		return false, fmt.Errorf("%s: table exists %s (%q): %w", d.Name, t.String(), args, err)
 	}
 	return n > 0, nil
 }
@@ -101,6 +101,9 @@ func (d *DB) ListTables(ctx context.Context, schema string) ([]Table, error) {
 		var t Table
 		if err := rows.Scan(&t.Schema, &t.Name); err != nil {
 			return nil, err
+		}
+		if strings.ContainsRune(t.Schema+t.Name, 0) {
+			return nil, fmt.Errorf("%s: catalog name with a NUL byte: %q.%q", d.Name, t.Schema, t.Name)
 		}
 		out = append(out, t)
 	}
