@@ -270,7 +270,7 @@ func (w *repWizard) footer() (string, string) {
 	}
 	jump := []string{}
 	if w.entry == entryFull {
-		jump = []string{"tab/shift+tab", "step", "1-4", "step"}
+		jump = []string{"tab/shift+tab", "step"}
 	}
 	switch w.step {
 	case stepBasics:
@@ -340,7 +340,7 @@ func (w *repWizard) keyHelp() (string, [][2]string) {
 	}
 	if w.entry == entryFull {
 		rows = append(rows, [2]string{"enter", "next field, next step on the last"}, [2]string{"ctrl+s", "review, then save"},
-			[2]string{"tab / shift+tab", "past the last field or before the first: next / previous step"}, [2]string{"1 2 3 4", "step, when not typing"}, [2]string{"esc", "previous step; cancel on the first"})
+			[2]string{"tab / shift+tab", "next / previous step"}, [2]string{"1 2 3 4", "step, when not typing"}, [2]string{"esc", "previous step; cancel on the first"})
 	}
 	if w.step == stepStreams {
 		rows = append(rows, [2]string{"a", "add tables or an endpoint"}, [2]string{"s", "a query on the source; + adds it as a stream"}, [2]string{"enter", "the stream on its data: sql, columns, steps; ctrl+s saves into the draft"}, [2]string{"E", "settings: object, mode, keys, where, limit"},
@@ -573,9 +573,6 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		case formCancel:
 			return wizCancel, nil
 		case formSubmit, formNext:
-			if res == formNext && w.entry != entryFull {
-				return wizContinue, nil
-			}
 			w.basics.commit()
 			if !w.basics.validate() {
 				return wizContinue, w.basics.focus()
@@ -600,9 +597,6 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			w.step = stepBasics
 			return wizContinue, w.basics.focus()
 		case formSubmit, formNext:
-			if res == formNext && w.entry != entryFull {
-				return wizContinue, nil
-			}
 			w.defaults.commit()
 			if !w.defaults.validate() {
 				return wizContinue, w.defaults.focus()
@@ -611,9 +605,7 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			w.step = stepStreams
 			return wizContinue, w.enterStreams()
 		case formPrev:
-			if w.entry == entryFull {
-				return w.jump(stepBasics)
-			}
+			return w.jump(stepBasics)
 		}
 		return wizContinue, cmd
 	case stepStreams:

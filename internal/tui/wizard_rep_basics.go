@@ -82,6 +82,7 @@ func (w *repWizard) buildBasics() {
 		toggle("enabled", "Enabled", "off: manual runs only", d.Enabled),
 	)
 	w.basics.done = "next"
+	w.basics.tabSteps = w.entry == entryFull
 }
 
 // scheduleOf is the cron expression the basics form describes.
@@ -157,6 +158,7 @@ func (w *repWizard) buildDefaults() {
 	}
 	w.defaults = newForm("Defaults", fields...)
 	w.defaults.done = "next"
+	w.defaults.tabSteps = w.entry == entryFull
 }
 
 // seenCols lists the columns of the source tables read so far, for the defaults' keys.

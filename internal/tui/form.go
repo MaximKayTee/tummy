@@ -180,6 +180,7 @@ type form struct {
 	action  string // "key:row" after an Actions row was picked; see takeAction
 	init    map[string]string
 	done    string // what enter on the last field does, for the footer; "" is apply
+	tabSteps bool  // tab and shift+tab leave the form as formNext / formPrev; ↓/↑ move fields
 }
 
 const dropRows = 10
@@ -457,14 +458,14 @@ func (f *form) handle(msg tea.KeyMsg) (formResult, tea.Cmd) {
 	case "up":
 		return formContinue, f.move(-1)
 	case "shift+tab":
-		if f.cur == 0 {
+		if f.tabSteps {
 			return formPrev, nil
 		}
 		return formContinue, f.move(-1)
 	case "down":
 		return formContinue, f.move(1)
 	case "tab":
-		if f.cur >= len(f.visible())-1 {
+		if f.tabSteps {
 			return formNext, nil
 		}
 		return formContinue, f.move(1)
@@ -700,6 +701,9 @@ func (f *form) hints() []string {
 		return nil
 	}
 	next := []string{"tab/↓", "next"}
+	if f.tabSteps {
+		next = []string{"↓", "next"}
+	}
 	if last {
 		next = []string{"enter", f.doneWord()}
 	}

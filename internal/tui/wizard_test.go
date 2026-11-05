@@ -1335,20 +1335,22 @@ func TestTabPastTheEndMovesSteps(t *testing.T) {
 	w.basics.set("name", "tabby")
 	w.basics.set("source", "SRC")
 	w.basics.set("target", "TGT")
-	last := len(w.basics.visible()) - 1
-	for i := 0; i < last; i++ {
-		send(t, w, keyTab)
-	}
-	if w.step != stepBasics {
-		t.Fatal("tab within the form stays")
+	send(t, w, keyDown)
+	if w.step != stepBasics || w.basics.cur != 1 {
+		t.Fatal("down moves a field")
 	}
 	send(t, w, keyTab)
 	if w.step != stepDefaults {
-		t.Fatalf("tab past the last field: step %d", w.step)
+		t.Fatalf("tab from any field: step %d", w.step)
 	}
 	send(t, w, tea.KeyMsg{Type: tea.KeyShiftTab})
 	if w.step != stepBasics {
-		t.Fatalf("shift+tab before the first field: step %d", w.step)
+		t.Fatalf("shift+tab: step %d", w.step)
+	}
+	// a stream edited on its own (E on the detail view) keeps tab as a field key
+	w2, _ := newEditStreamWizard(opts, conns, "alpha", "things")
+	if w2.stream == nil || w2.stream.tabSteps {
+		t.Fatal("single-stream wizard: tab is not a step key")
 	}
 	send(t, w, keyTab)
 	walk(t, w) // defaults -> streams
