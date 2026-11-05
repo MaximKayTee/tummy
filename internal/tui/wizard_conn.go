@@ -421,7 +421,7 @@ func (w *connWizard) startProbe() tea.Cmd {
 
 // probeConn connects and lists what the connection can see.
 func probeConn(c *config.Conn) connProbeMsg {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	res, err := probe.Conn(ctx, c, probe.AllSchemas)
 	msg := connProbeMsg{Name: c.Name, Tables: res.Tables, Err: err, Took: res.Took}
