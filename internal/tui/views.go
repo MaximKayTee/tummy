@@ -860,6 +860,8 @@ func (m Model) connsView() []string {
 		switch {
 		case m.testing[c.Name]:
 			test = sWarn.Render(m.spin.View() + " testing")
+		case c.Err != "":
+			test = sErr.Render(glyphErr + " " + txt.Clean(txt.FirstLine(c.Err)))
 		default:
 			if res, ok := m.connResults[c.Name]; ok {
 				if res.Err != nil {

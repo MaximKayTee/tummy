@@ -334,3 +334,29 @@ func runBatch(t *testing.T, cmd tea.Cmd) []tea.Msg {
 }
 
 var _ = errors.New
+
+func TestBadConnListedWithError(t *testing.T) {
+	opts := testHome(t)
+	f, _ := os.OpenFile(opts.Connections, os.O_APPEND|os.O_WRONLY, 0o644)
+	f.WriteString("\n[conn.BAD]\ntype = \"mssql\"\nurl = \"myhost\"\n")
+	f.Close()
+	m := loaded(t, opts)
+	var bad, good int
+	for _, c := range m.snap.Conns {
+		switch {
+		case c.Name == "BAD" && strings.Contains(c.Err, "sqlserver://"):
+			bad++
+		case c.Name == "(error)":
+			t.Fatalf("whole file reported: %s", c.Target)
+		case c.Err == "":
+			good++
+		}
+	}
+	if bad != 1 || good == 0 {
+		t.Fatalf("rows %+v", m.snap.Conns)
+	}
+	m.view = viewConns
+	if v := strings.Join(m.connsView(), "\n"); !strings.Contains(v, "BAD") || !strings.Contains(v, "sqlserver://") {
+		t.Fatalf("view:\n%s", v)
+	}
+}

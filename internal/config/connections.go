@@ -145,6 +145,9 @@ func connKeys() []string { return keysOf(Conn{}) }
 
 var authModes = []string{"none", "bearer", "basic", "header", "query"}
 
+// Check validates values that do not depend on the environment.
+func (c *Conn) Check() error { return c.check() }
+
 // check validates values that do not depend on the environment.
 func (c *Conn) check() error {
 	fail := func(format string, args ...any) error {
