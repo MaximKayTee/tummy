@@ -69,6 +69,20 @@ func Conn(ctx context.Context, c *config.Conn, schema string) (Result, error) {
 	return res, nil
 }
 
+// Open opens a database connection as Conn does, without listing anything.
+func Open(ctx context.Context, c *config.Conn) (*db.DB, error) {
+	start := time.Now()
+	x, err := c.Expanded()
+	if err != nil {
+		return nil, err
+	}
+	d, err := db.Open(ctx, x.DB())
+	if err != nil {
+		return nil, fmt.Errorf("conn %s: connect after %s: %s", x.Name, time.Since(start).Round(time.Millisecond), strings.TrimPrefix(err.Error(), "conn "+x.Name+": "))
+	}
+	return d, nil
+}
+
 // CreateSQLite creates an empty sqlite database at path, 0600, and its directory, 0700.
 // path is resolved, as Conn.Expanded gives it. An existing file is left alone.
 func CreateSQLite(path string) error {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"tummy/internal/txt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"tummy/internal/api"
 	"tummy/internal/config"
@@ -82,6 +84,15 @@ type connProbeMsg struct {
 	Took    time.Duration
 }
 
+// connOpenMsg is the first half of a database test: the connection is open, the listing
+// follows as a second command so the screen can say which step it is on.
+type connOpenMsg struct {
+	Name string
+	DB   *db.DB
+	Took time.Duration
+	Err  error
+}
+
 type connStep int
 
 const (
@@ -97,6 +108,9 @@ type connWizard struct {
 	form      *form
 	step      connStep
 	probing   bool
+	connected time.Duration // set while listing, after the open step
+	scroll    int           // test screen: first table shown
+	pageSize  int           // test screen: tables per page, set by view
 	probe     *connProbeMsg
 	done      statusMsg
 	savedName string
@@ -254,7 +268,7 @@ func (w *connWizard) footer() (string, string) {
 	case w.step == connTest && w.canCreate() != "":
 		return helpLine("c", "create file", "ctrl+s", "save", "t", "test again"), helpLine("esc", "edit")
 	case w.step == connTest:
-		return helpLine("ctrl+s", "save", "t", "test again"), helpLine("esc", "edit")
+		return helpLine("ctrl+s", "save", "t", "test again", "↑/↓ pgup/pgdn", "scroll"), helpLine("esc", "edit")
 	}
 	return helpLine(append(w.form.hints(), "ctrl+s", "save", "ctrl+g", "test")...), helpLine("esc", escWord(w.form, "cancel"))
 }
@@ -351,6 +365,14 @@ func (w *connWizard) conn() *config.Conn {
 
 func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 	switch msg := msg.(type) {
+	case connOpenMsg:
+		if msg.Err != nil {
+			w.probing = false
+			w.probe = &connProbeMsg{Name: msg.Name, Err: msg.Err, Took: msg.Took}
+			return wizContinue, nil
+		}
+		w.connected = msg.Took
+		return wizContinue, listTablesCmd(msg)
 	case connProbeMsg:
 		w.probing = false
 		w.probe = &msg
@@ -374,6 +396,18 @@ func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 				return wizContinue, w.form.focus()
 			case "t", "ctrl+g":
 				return wizContinue, w.startProbe()
+			case "down", "j":
+				w.scroll++
+			case "up", "k":
+				w.scroll = max(w.scroll-1, 0)
+			case "pgdown", " ":
+				w.scroll += w.pageSize
+			case "pgup":
+				w.scroll = max(w.scroll-w.pageSize, 0)
+			case "home", "g":
+				w.scroll = 0
+			case "end", "G":
+				w.scroll = math.MaxInt32
 			case "c":
 				if path := w.canCreate(); path != "" {
 					if err := probe.CreateSQLite(path); err != nil {
@@ -415,25 +449,52 @@ func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 func (w *connWizard) startProbe() tea.Cmd {
 	w.probing = true
 	w.probe = nil
+	w.connected = 0
+	w.scroll = 0
 	c := w.conn()
-	return func() tea.Msg { return probeConn(c) }
+	if c.Type == "api" || c.Type == "sqlite" {
+		return func() tea.Msg { return probeConn(c) }
+	}
+	return func() tea.Msg { return openConn(c) }
 }
 
-// probeConn connects and lists what the connection can see.
+// probeConn reaches an API or opens a sqlite file and lists its tables, in one step.
 func probeConn(c *config.Conn) connProbeMsg {
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	res, err := probe.Conn(ctx, c, probe.AllSchemas)
-	msg := connProbeMsg{Name: c.Name, Tables: res.Tables, Err: err, Took: res.Took}
-	if err == nil && c.Type != "api" {
-		if x, err := c.Expanded(); err == nil {
-			if d, err := db.Open(ctx, x.DB()); err == nil {
-				msg.Schemas, _ = d.ListSchemas(ctx)
-				d.Close()
-			}
+	return connProbeMsg{Name: c.Name, Tables: res.Tables, Err: err, Took: res.Took}
+}
+
+// openConn is the connect step of a database test.
+func openConn(c *config.Conn) tea.Msg {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	d, err := probe.Open(ctx, c)
+	return connOpenMsg{Name: c.Name, DB: d, Took: time.Since(start), Err: err}
+}
+
+// listTablesCmd is the listing step: every schema's tables, then the schema names.
+func listTablesCmd(open connOpenMsg) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		defer open.DB.Close()
+		start := time.Now()
+		msg := connProbeMsg{Name: open.Name}
+		tables, err := open.DB.ListAllTables(ctx)
+		if err != nil {
+			msg.Err = fmt.Errorf("conn %s: list tables after %s, connected in %s: %w", open.Name, txt.Dur(time.Since(start)), txt.Dur(open.Took), err)
+			return msg
 		}
+		for _, t := range tables {
+			msg.Tables = append(msg.Tables, t.String())
+		}
+		msg.Schemas, _ = open.DB.ListSchemas(ctx)
+		msg.Took = open.Took + time.Since(start)
+		return msg
 	}
-	return msg
 }
 
 // trySave validates and saves; a rename asks about the replications using the old name.
@@ -539,6 +600,8 @@ func (w *connWizard) view(width, height int) []string {
 	c := w.conn()
 	out := []string{" " + sTitle.Render(txt.Clean(c.Name)) + "  " + sDim.Render(txt.Clean(c.Type+"  "+c.Target())), ""}
 	switch {
+	case w.probing && w.connected > 0:
+		out = append(out, "  "+sOK.Render(glyphOK+" connected")+sDim.Render("  "+txt.Dur(w.connected))+"   "+sWarn.Render("◐ listing tables"))
 	case w.probing:
 		out = append(out, "  "+sWarn.Render("◐ connecting"))
 	case w.probe != nil && w.probe.Err != nil:
@@ -548,17 +611,20 @@ func (w *connWizard) view(width, height int) []string {
 		if c.Type != "api" {
 			out = append(out, "", "  "+sHeader.Render(plural(len(w.probe.Tables), "table")))
 			if counts := schemaCounts(w.probe.Tables); len(counts) > 1 {
-				out = append(out, "  "+sDim.Render(txt.Clean(strings.Join(counts, "  "))))
+				for _, line := range wrapWords(counts, "   ", max(width-4, 20)) {
+					out = append(out, "  "+sDim.Render(txt.Clean(line)))
+				}
 			}
-			shown := w.probe.Tables
-			if room := max(height-9, 0); len(shown) > room {
-				shown = shown[:room]
-			}
+			all := w.probe.Tables
+			room := max(height-len(out)-3, 1)
+			w.pageSize = room
+			w.scroll = max(min(w.scroll, len(all)-room), 0)
+			shown := all[w.scroll:min(w.scroll+room, len(all))]
 			for _, t := range shown {
 				out = append(out, "    "+txt.Clean(t))
 			}
-			if len(shown) < len(w.probe.Tables) {
-				out = append(out, sDim.Render(fmt.Sprintf("    … %d more", len(w.probe.Tables)-len(shown))))
+			if end := w.scroll + len(shown); end < len(all) || w.scroll > 0 {
+				out = append(out, sDim.Render(fmt.Sprintf("    %d-%d of %d", w.scroll+1, end, len(all))))
 			}
 		}
 	}
@@ -669,6 +735,28 @@ func schemaCounts(tables []string) []string {
 	var out []string
 	for _, s := range order {
 		out = append(out, fmt.Sprintf("%s %d", s, n[s]))
+	}
+	return out
+}
+
+// wrapWords joins words with sep into lines no wider than width; a word wider than width
+// gets a line of its own.
+func wrapWords(words []string, sep string, width int) []string {
+	var out []string
+	line := ""
+	for _, w := range words {
+		switch {
+		case line == "":
+			line = w
+		case lipgloss.Width(line)+lipgloss.Width(sep)+lipgloss.Width(w) <= width:
+			line += sep + w
+		default:
+			out = append(out, line)
+			line = w
+		}
+	}
+	if line != "" {
+		out = append(out, line)
 	}
 	return out
 }
