@@ -551,7 +551,11 @@ func (w *repWizard) footer() (string, string) {
 		if w.isAPI() {
 			add = "add endpoint"
 		}
-		return helpLine(append([]string{"a", add, "enter", "data, sql, steps", "E", "settings", "e", "on/off", "d", "delete", "ctrl+s", save}, jump...)...), helpLine("esc", "back")
+		keys := []string{"a", add}
+		if len(w.draft.Streams) > 0 {
+			keys = append(keys, "enter", "data, sql, steps", "E", "settings", "e", "on/off", "d", "delete")
+		}
+		return helpLine(append(append(keys, "ctrl+s", save), jump...)...), helpLine("esc", "back")
 	}
 	return helpLine(append([]string{"ctrl+s", "save", "↑/↓ pgup/pgdn", "scroll"}, jump...)...), helpLine("esc", "back")
 }
