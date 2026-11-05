@@ -77,20 +77,22 @@ var nameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 func connTypes() []string { return append(db.Dialects(), "api") }
 
 type connProbeMsg struct {
-	Name    string
-	Tables  []string
-	Schemas []string // databases with schemas
-	Err     error
-	Took    time.Duration
+	Name      string
+	Databases []string // listed instead of tables when the connection names no database
+	Tables    []string
+	Schemas   []string // databases with schemas
+	Err       error
+	Took      time.Duration
 }
 
 // connOpenMsg is the first half of a database test: the connection is open, the listing
 // follows as a second command so the screen can say which step it is on.
 type connOpenMsg struct {
-	Name string
-	DB   *db.DB
-	Took time.Duration
-	Err  error
+	Name      string
+	DB        *db.DB
+	Took      time.Duration
+	Err       error
+	Databases bool // list databases, not tables
 }
 
 type connStep int
@@ -203,7 +205,7 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 			}
 			return nil
 		}),
-		text("database", "Database", "").def(parts.Database).when(fields),
+		text("database", "Database", "blank: test lists the databases").def(parts.Database).when(fields),
 		choice("fedauth", "Auth", "", entraModes...).empty("SQL login").notes(entraNotes).def(parts.Query.Get("fedauth")).when(func(f *form) bool { return fields(f) && f.get("type") == "mssql" }),
 		text("user", "User", "").def(parts.User).when(func(f *form) bool { return fields(f) || authIs("basic")(f) }).requiredWhen(func(f *form) bool {
 			return authIs("basic")(f) || !noPassword(f.get("fedauth"))
@@ -466,13 +468,26 @@ func probeConn(c *config.Conn) connProbeMsg {
 	return connProbeMsg{Name: c.Name, Tables: res.Tables, Err: err, Took: res.Took}
 }
 
-// openConn is the connect step of a database test.
+// noDatabase is true when the url names no database. Such a test lists the databases.
+func noDatabase(c *config.Conn) bool {
+	p, ok := config.ParseURL(c.URL)
+	return ok && p.Database == "" && (c.Type == "postgres" || c.Type == "mssql")
+}
+
+// openConn is the connect step of a database test. Postgres needs a database to log
+// into: without one the maintenance database stands in.
 func openConn(c *config.Conn) tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	start := time.Now()
-	d, err := probe.Open(ctx, c)
-	return connOpenMsg{Name: c.Name, DB: d, Took: time.Since(start), Err: err}
+	x := *c
+	if c.Type == "postgres" && noDatabase(c) {
+		p, _ := config.ParseURL(c.URL)
+		p.Database = "postgres"
+		x.URL = p.String()
+	}
+	d, err := probe.Open(ctx, &x)
+	return connOpenMsg{Name: c.Name, DB: d, Took: time.Since(start), Err: err, Databases: noDatabase(c)}
 }
 
 // listTablesCmd is the listing step: every schema's tables, then the schema names.
@@ -483,6 +498,15 @@ func listTablesCmd(open connOpenMsg) tea.Cmd {
 		defer open.DB.Close()
 		start := time.Now()
 		msg := connProbeMsg{Name: open.Name}
+		if open.Databases {
+			dbs, err := open.DB.ListDatabases(ctx)
+			if err != nil {
+				msg.Err = fmt.Errorf("conn %s: list databases: %w", open.Name, err)
+				return msg
+			}
+			msg.Databases, msg.Took = dbs, open.Took+time.Since(start)
+			return msg
+		}
 		tables, err := open.DB.ListAllTables(ctx)
 		if err != nil {
 			msg.Err = fmt.Errorf("conn %s: list tables after %s, connected in %s: %w", open.Name, txt.Dur(time.Since(start)), txt.Dur(open.Took), err)
@@ -608,7 +632,12 @@ func (w *connWizard) view(width, height int) []string {
 		out = append(out, strings.Split(sErrBox.Width(max(width-4, 20)).Render(txt.CleanText(w.probe.Err.Error())), "\n")...)
 	case w.probe != nil:
 		out = append(out, "  "+sOK.Render(glyphOK+" connected")+sDim.Render("  "+txt.Dur(w.probe.Took)))
-		if c.Type != "api" {
+		if len(w.probe.Databases) > 0 {
+			out = append(out, "", "  "+sHeader.Render(plural(len(w.probe.Databases), "database")))
+			for _, d := range w.probe.Databases {
+				out = append(out, "    "+txt.Clean(d))
+			}
+		} else if c.Type != "api" {
 			out = append(out, "", "  "+sHeader.Render(plural(len(w.probe.Tables), "table")))
 			if counts := schemaCounts(w.probe.Tables); len(counts) > 1 {
 				for _, line := range wrapWords(counts, "   ", max(width-4, 20)) {

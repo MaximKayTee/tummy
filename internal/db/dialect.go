@@ -28,6 +28,9 @@ type Dialect interface {
 	TableExists(t Table, defaultSchema string) (string, []any)
 	// CreateSchema creates schema when it does not exist; "" when the engine has none.
 	CreateSchema(schema string) string
+	// ListDatabases lists the databases on the server, one name per row; "" when the
+	// engine has no databases beyond the schemas.
+	ListDatabases() string
 	ListTables(schema, defaultSchema string) (string, []any)
 	// PrimaryKey lists the primary-key columns of t in key order, one per row.
 	PrimaryKey(t Table, defaultSchema string) (string, []any)
@@ -154,6 +157,9 @@ func (postgres) TableExists(t Table, def string) (string, []any) {
 	return "SELECT count(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2",
 		[]any{cmp.Or(t.Schema, def, "public"), t.Name}
 }
+func (postgres) ListDatabases() string {
+	return "SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY 1"
+}
 func (d postgres) CreateSchema(s string) string { return "CREATE SCHEMA IF NOT EXISTS " + d.Quote(s) }
 func (postgres) ListTables(schema, def string) (string, []any) {
 	if schema == AllSchemas {
@@ -243,6 +249,7 @@ func (mysql) TableExists(t Table, def string) (string, []any) {
 	}
 	return "SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", []any{t.Name}
 }
+func (mysql) ListDatabases() string          { return "" }
 func (d mysql) CreateSchema(s string) string { return "CREATE DATABASE IF NOT EXISTS " + d.Quote(s) }
 func (mysql) ListTables(schema, def string) (string, []any) {
 	if schema == AllSchemas {
@@ -338,6 +345,7 @@ func (mssql) TableExists(t Table, def string) (string, []any) {
 	return "SELECT count(*) FROM information_schema.tables WHERE table_schema = @p1 AND table_name = @p2",
 		[]any{cmp.Or(t.Schema, def, "dbo"), t.Name}
 }
+func (mssql) ListDatabases() string { return "SELECT name FROM sys.databases ORDER BY name" }
 func (d mssql) CreateSchema(s string) string {
 	return "IF SCHEMA_ID(N'" + strings.ReplaceAll(s, "'", "''") + "') IS NULL EXEC('CREATE SCHEMA " + strings.ReplaceAll(d.Quote(s), "'", "''") + "')"
 }
@@ -441,6 +449,7 @@ func (sqlite) CastType(k Kind) string {
 func (sqlite) TableExists(t Table, _ string) (string, []any) {
 	return "SELECT count(*) FROM sqlite_master WHERE type IN ('table','view') AND name = ?", []any{t.Name}
 }
+func (sqlite) ListDatabases() string      { return "" }
 func (sqlite) CreateSchema(string) string { return "" }
 func (sqlite) ListTables(string, string) (string, []any) {
 	return "SELECT '', name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY 1", nil

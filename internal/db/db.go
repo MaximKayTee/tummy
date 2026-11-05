@@ -147,6 +147,28 @@ func (d *DB) ListSchemas(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
+// ListDatabases lists the databases on the server; nil when the engine has none.
+func (d *DB) ListDatabases(ctx context.Context) ([]string, error) {
+	q := d.Dialect.ListDatabases()
+	if q == "" {
+		return nil, nil
+	}
+	rows, err := d.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", d.Name, err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // AllSchemas as the schema of ListTables lists every schema in one query, system
 // schemas left out, ordered by schema then name.
 const AllSchemas = "*"
