@@ -84,6 +84,9 @@ func table(width int, cols []column, rows [][]string, selected int) []string {
 
 // selectedLine marks a rendered line (starting with two spaces) as the cursor row.
 func selectedLine(line string, width int) string {
+	if line == "" {
+		line = " "
+	}
 	return sSelected.Render(sKey.Render("›") + pad(line[1:], max(width-1, 0), false))
 }
 

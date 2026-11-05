@@ -326,7 +326,7 @@ func (w *repWizard) keyHelp() (string, [][2]string) {
 	switch {
 	case w.pick != nil:
 		rows = append(rows, [2]string{"type", "filter"}, [2]string{"new", "typed value"},
-			[2]string{"space", "tick"}, [2]string{"ctrl+a / ctrl+n", "tick all / none shown"},
+			[2]string{"space", "tick"}, [2]string{"ctrl+a / ctrl+n, alt+a / alt+n", "tick all / none shown"},
 			[2]string{"schema.*", "every table of the schema, new ones too"},
 			[2]string{"ctrl+e", "the table's data; ctrl+s there adds it as shaped"},
 			[2]string{"enter", "add the ticked tables"}, [2]string{"esc", "cancel"})

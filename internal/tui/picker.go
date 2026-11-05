@@ -315,7 +315,7 @@ func (p *picker) updateLive(msg tea.KeyMsg) (formResult, tea.Cmd) {
 			}
 		}
 		return formContinue, nil
-	case "ctrl+n":
+	case "ctrl+n", "alt+n":
 		if !p.single {
 			for _, it := range vis {
 				if p.selected[it] {
@@ -340,13 +340,13 @@ func (p *picker) hints() []string {
 	case p.live && p.single:
 		return []string{"type", "filter", "enter", "pick"}
 	case p.live:
-		return []string{"type", "filter", "space", "tick", "ctrl+a/n", "all/none", "ctrl+e", "preview", "enter", "done"}
+		return []string{"type", "filter", "space", "tick", "ctrl+a/n alt+a/n", "all/none", "ctrl+e", "preview", "enter", "done"}
 	case p.typing && p.single:
 		return []string{"type", "filter", "enter", "pick"}
 	case p.typing:
 		return []string{"enter", "apply filter"}
 	}
-	return []string{"/", "filter", "space", "tick", "ctrl+a/n", "all/none", "enter", "done"}
+	return []string{"/", "filter", "space", "tick", "ctrl+a/n alt+a/n", "all/none", "enter", "done"}
 }
 
 func (p *picker) view(width, height int) []string {

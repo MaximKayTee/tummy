@@ -131,6 +131,14 @@ var entraNotes = map[string]string{
 	"ActiveDirectoryAzCli":            "az login on this machine",
 }
 
+// entraMode is the Auth choice when it applies: SQL Server only; "" otherwise.
+func entraMode(f *form) string {
+	if f.get("type") != "mssql" || !f.shown("fedauth") {
+		return ""
+	}
+	return f.get("fedauth")
+}
+
 // noPassword lists the Entra modes that take no password.
 func noPassword(mode string) bool {
 	return mode == "ActiveDirectoryDefault" || mode == "ActiveDirectoryManagedIdentity" || mode == "ActiveDirectoryAzCli"
@@ -208,10 +216,10 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 		text("database", "Database", "blank: test lists the databases").def(parts.Database).when(fields),
 		choice("fedauth", "Auth", "", entraModes...).empty("SQL login").notes(entraNotes).def(parts.Query.Get("fedauth")).when(func(f *form) bool { return fields(f) && f.get("type") == "mssql" }),
 		text("user", "User", "").def(parts.User).when(func(f *form) bool { return fields(f) || authIs("basic")(f) }).requiredWhen(func(f *form) bool {
-			return authIs("basic")(f) || !noPassword(f.get("fedauth"))
+			return authIs("basic")(f) || !noPassword(entraMode(f))
 		}),
 		secret("password", "Password", "${VAR}: environment").eg("${DB_PASS}").def(parts.Password).when(func(f *form) bool {
-			return (fields(f) && !noPassword(f.get("fedauth"))) || authIs("basic")(f)
+			return (fields(f) && !noPassword(entraMode(f))) || authIs("basic")(f)
 		}),
 		text("options", "Options", "driver parameters").def(pairs(queryPairs(parts.Query))).when(fields).check(checkPairs).helpFn(func(f *form) string {
 			if f.get("options") != "" {
@@ -348,7 +356,8 @@ func (w *connWizard) conn() *config.Conn {
 		if h, inst, has := strings.Cut(p.Host, "\\"); has && c.Type == "mssql" {
 			p.Host, p.Instance = h, inst
 		}
-		if !noPassword(f.get("fedauth")) {
+		mode := entraMode(f)
+		if !noPassword(mode) {
 			p.Password = f.get("password")
 		}
 		if opts, _ := parsePairs(f.get("options")); opts != nil {
@@ -356,8 +365,8 @@ func (w *connWizard) conn() *config.Conn {
 				p.Query.Set(k, v)
 			}
 		}
-		if m := f.get("fedauth"); m != "" {
-			p.Query.Set("fedauth", m)
+		if mode != "" {
+			p.Query.Set("fedauth", mode)
 		}
 		c.URL = p.String()
 	}

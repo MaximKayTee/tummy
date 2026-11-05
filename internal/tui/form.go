@@ -509,12 +509,12 @@ func (f *form) handle(msg tea.KeyMsg) (formResult, tea.Cmd) {
 		switch msg.String() {
 		case " ", "right":
 			return formContinue, f.openDrop(fl, "")
-		case "ctrl+a":
+		case "ctrl+a", "alt+a":
 			for _, o := range fl.Options {
 				fl.Picked[o] = true
 			}
 			fl.err = ""
-		case "ctrl+n":
+		case "ctrl+n", "alt+n":
 			fl.Picked = map[string]bool{}
 		default:
 			if r := typedRunes(msg); r != "" {
@@ -711,7 +711,7 @@ func (f *form) hints() []string {
 	case kindSelect:
 		return append([]string{"space", "open", "←/→", "cycle"}, next...)
 	case kindMulti:
-		return append([]string{"space", "open", "ctrl+a/n", "all/none"}, next...)
+		return append([]string{"space", "open", "ctrl+a/n alt+a/n", "all/none"}, next...)
 	case kindToggle:
 		return append([]string{"space", "on/off"}, next...)
 	}

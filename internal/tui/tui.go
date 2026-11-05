@@ -154,7 +154,7 @@ func (m Model) tick() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
+		m.width, m.height = max(msg.Width, 1), max(msg.Height, 1) // a pty may report 0 before its size is known
 		m.vp.Width = max(m.width-4, 10)
 		m.vp.Height = max(m.bodyHeight()-2, 3)
 		m.clampCursor()
@@ -205,6 +205,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case deletedMsg:
 		m.status, m.statusAt = statusMsg(msg), time.Now()
+		clear(m.tableLists) // a deleted connection's name may be reused
 		m.clampCursor()
 		return m, m.loadSnapshot()
 
@@ -265,7 +266,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyRunes { // a web terminal can send NUL and other control bytes as text
-			msg.Runes = slices.DeleteFunc(slices.Clone(msg.Runes), func(r rune) bool { return r < 0x20 || r == 0x7f })
+			msg.Runes = slices.DeleteFunc(slices.Clone(msg.Runes), func(r rune) bool {
+				if msg.Paste && (r == '\n' || r == '\r' || r == '\t') {
+					return false // pasted text keeps its lines
+				}
+				return r < 0x20 || r == 0x7f
+			})
 			if len(msg.Runes) == 0 {
 				return m, nil
 			}
@@ -284,18 +290,18 @@ func (m Model) wizUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err == nil && len(msg.Tables) > 0 {
 			m.tableLists[msg.Conn] = msg.Tables
 		}
-	case connProbeMsg:
-		if msg.Err == nil && len(msg.Tables) > 0 {
-			m.tableLists[msg.Name] = msg.Tables
-		}
 	}
 	res, cmd := m.wiz.update(msg)
 	switch res {
 	case wizDone:
 		m.status, m.statusAt = m.wiz.result(), time.Now()
 		m.focusOn = m.wiz.saved()
-		if cw, ok := m.wiz.(*connWizard); ok && cw.probe != nil && cw.savedName != "" {
-			m.connResults[cw.savedName] = connTestMsg{Name: cw.savedName, Err: cw.probe.Err, Took: cw.probe.Took}
+		if cw, ok := m.wiz.(*connWizard); ok {
+			delete(m.tableLists, cw.savedName) // the connection may point elsewhere now
+			delete(m.tableLists, cw.original)
+			if cw.probe != nil && cw.savedName != "" {
+				m.connResults[cw.savedName] = connTestMsg{Name: cw.savedName, Err: cw.probe.Err, Took: cw.probe.Took}
+			}
 		}
 		if m.wizFrom == viewDetail && m.focusOn != "" {
 			if _, ok := m.wiz.(*repWizard); ok {
@@ -574,10 +580,12 @@ func (m Model) handleKeyInner(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 	case key.Matches(msg, keys.Conns) && m.view != viewConns:
 		m.view = viewConns
+		m.filter.SetValue("")
 		m.clampCursor()
 		return m, nil
 	case key.Matches(msg, keys.History) && m.view == viewList:
 		m.repName, m.streamName = "", ""
+		m.filter.SetValue("")
 		m.view = viewHistory
 		m.runs = nil
 		m.cursor[viewHistory] = 0
@@ -718,6 +726,7 @@ func (m Model) keyDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.openWizard(w, err)
 	case key.Matches(msg, keys.History) && hasStream:
 		m.streamName = stream
+		m.filter.SetValue("")
 		m.view = viewHistory
 		m.runs = nil
 		m.cursor[viewHistory] = 0
@@ -900,6 +909,9 @@ func (m Model) keyConns(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) startRun(rep replication, streams []string) (tea.Model, tea.Cmd) {
 	if m.inflight[rep.Name] {
 		return m, status(rep.Name+": running", true)
+	}
+	if rep.Err != "" || rep.ConnErr != "" { // refused before anything is marked
+		return m, m.runNow(rep, streams)
 	}
 	if !m.daemonServes() {
 		m.inflight[rep.Name] = true
