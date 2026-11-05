@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -106,5 +108,43 @@ func TestRunLabels(t *testing.T) {
 		describeRunErr(state.ErrCancelled) != "cancelled" ||
 		describeRunErr(errors.New("first\nsecond")) != "first" {
 		t.Error("describeRunErr")
+	}
+}
+
+func TestDetachedRun(t *testing.T) {
+	opts := testHome(t)
+	opts.RunCommand = []string{"sh", "-c", `[ "$1" = alpha ] && [ "$2" = --streams ] && [ "$3" = things ] && echo ran >&2`, "tummy"}
+	m := loaded(t, opts)
+	rep, _ := m.rep("alpha")
+	mm, cmd := m.startRun(rep, []string{"things"})
+	m = mm.(Model)
+	if !m.inflight["alpha"] || len(m.cancels) != 0 {
+		t.Fatal("detached run: inflight, nothing to cancel")
+	}
+	var done *runDoneMsg
+	for _, msg := range runBatch(t, cmd) {
+		if d, ok := msg.(runDoneMsg); ok {
+			done = &d
+		}
+	}
+	if done == nil || done.Err != nil {
+		t.Fatalf("done: %+v", done)
+	}
+	log, _ := os.ReadFile(filepath.Join(filepath.Dir(opts.State.Path), "tui.log"))
+	if !strings.Contains(string(log), "ran") {
+		t.Fatalf("child output in tui.log: %q", log)
+	}
+	// quitting with a detached run leaves at once
+	if _, cmd := m.quit(""); !isQuit(cmd) {
+		t.Fatal("quit should not wait for a detached run")
+	}
+	// a failing child reports without stopping the TUI
+	opts.RunCommand = []string{"sh", "-c", "exit 3", "tummy"}
+	m = loaded(t, opts)
+	_, cmd = m.startRun(rep, nil)
+	for _, msg := range runBatch(t, cmd) {
+		if d, ok := msg.(runDoneMsg); ok && d.Err == nil {
+			t.Fatal("exit 3 should report an error")
+		}
 	}
 }

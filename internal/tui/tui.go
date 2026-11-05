@@ -27,6 +27,9 @@ type Options struct {
 	State       *state.Store
 	// Refresh is the poll interval; zero means one second.
 	Refresh time.Duration
+	// RunCommand, when set, runs a replication as its own process: the command and
+	// its arguments, then NAME and --streams. The process outlives the TUI.
+	RunCommand []string
 }
 
 type view int
@@ -215,7 +218,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, cancel := range m.cancels {
 			cancel()
 		}
-		if len(m.inflight) == 0 {
+		if len(m.cancels) == 0 { // detached runs carry on without this process
 			return m, tea.Quit
 		}
 		m.quitting = true
@@ -503,7 +506,7 @@ const quitGrace = 5 * time.Second
 // quit leaves, asking first while a run of this process is in flight: quitting stops it.
 func (m Model) quit(text string) (tea.Model, tea.Cmd) {
 	var running []string
-	for name := range m.inflight {
+	for name := range m.cancels { // detached runs carry on without this process
 		running = append(running, name)
 	}
 	if len(running) > 0 {

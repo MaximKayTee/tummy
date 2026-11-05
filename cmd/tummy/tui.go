@@ -33,5 +33,9 @@ func runTUI(cmd *cobra.Command, _ []string) error {
 			f.Close()
 		}
 	}
-	return tui.Run(tui.Options{Home: flagHome, Connections: flagConnections, State: st})
+	opts := tui.Options{Home: flagHome, Connections: flagConnections, State: st}
+	if exe, err := os.Executable(); err == nil {
+		opts.RunCommand = []string{exe, "--home", flagHome, "--connections", flagConnections, "--state", flagState, "--quiet", "run"}
+	}
+	return tui.Run(opts)
 }

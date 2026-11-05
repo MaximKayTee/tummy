@@ -6,8 +6,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"syscall"
 	"time"
 	"tummy/internal/txt"
 
@@ -104,6 +107,9 @@ func (m Model) runNow(rep replication, streams []string) tea.Cmd {
 			return statusMsg{Text: "queued: " + runLabel(rep.Name, streams)}
 		}
 	}
+	if len(opts.RunCommand) > 0 {
+		return tea.Batch(status("running: "+runLabel(rep.Name, streams), false), m.runDetached(rep, streams))
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	if m.cancels != nil {
 		m.cancels[rep.Name] = cancel
@@ -137,6 +143,32 @@ func (m Model) runNow(rep replication, streams []string) tea.Cmd {
 	)
 }
 
+// runDetached starts the run as its own session with its output in tui.log, so it
+// finishes when this process is gone. The run reports through the state database.
+func (m Model) runDetached(rep replication, streams []string) tea.Cmd {
+	opts := m.opts
+	args := append(slices.Clone(opts.RunCommand[1:]), rep.Name)
+	if len(streams) > 0 {
+		args = append(args, "--streams", strings.Join(streams, ","))
+	}
+	return func() tea.Msg {
+		c := exec.Command(opts.RunCommand[0], args...)
+		c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if f := openLog(opts.State.Path); f != nil {
+			defer f.Close()
+			c.Stdout, c.Stderr = f, f
+		}
+		if err := c.Start(); err != nil {
+			_ = opts.State.Fail(context.Background(), rep.Name, "manual", err)
+			return runDoneMsg{Replication: rep.Name, Err: err}
+		}
+		if err := c.Wait(); err != nil {
+			return runDoneMsg{Replication: rep.Name, Err: errors.New("failed, see history")}
+		}
+		return runDoneMsg{Replication: rep.Name}
+	}
+}
+
 func runLabel(name string, streams []string) string {
 	if len(streams) == 0 {
 		return name
@@ -154,6 +186,16 @@ const logLimit = 5 << 20
 // runLogger writes engine output to tui.log next to the state database, off the screen.
 // The returned func closes the file.
 func runLogger(statePath string) (*slog.Logger, func()) {
+	f := openLog(statePath)
+	if f == nil {
+		return slog.New(slog.NewTextHandler(io.Discard, nil)), func() {}
+	}
+	return slog.New(slog.NewTextHandler(f, nil)), func() { f.Close() }
+}
+
+// openLog opens tui.log next to the state database for appending, truncated past
+// logLimit; nil when it cannot be opened.
+func openLog(statePath string) *os.File {
 	path := filepath.Join(filepath.Dir(statePath), "tui.log")
 	flags := os.O_CREATE | os.O_APPEND | os.O_WRONLY
 	if st, err := os.Stat(path); err == nil && st.Size() > logLimit {
@@ -161,9 +203,9 @@ func runLogger(statePath string) (*slog.Logger, func()) {
 	}
 	f, err := os.OpenFile(path, flags, 0o600)
 	if err != nil {
-		return slog.New(slog.NewTextHandler(io.Discard, nil)), func() {}
+		return nil
 	}
-	return slog.New(slog.NewTextHandler(f, nil)), func() { f.Close() }
+	return f
 }
 
 func (m Model) toggleEnabled(rep replication) tea.Cmd {
