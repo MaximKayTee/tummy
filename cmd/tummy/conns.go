@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -38,6 +39,7 @@ func connsCmd() *cobra.Command {
 		},
 	}
 
+	var timeout time.Duration
 	test := &cobra.Command{
 		Use:   "test NAME",
 		Short: "Open a database and count the tables of every schema, or reach an API's base_url",
@@ -52,7 +54,9 @@ func connsCmd() *cobra.Command {
 				_, err := conns.Get(args[0])
 				return err
 			}
-			res, err := probe.Conn(cmd.Context(), c, probe.AllSchemas)
+			ctx, cancel := context.WithTimeout(cmd.Context(), timeout)
+			defer cancel()
+			res, err := probe.Conn(ctx, c, probe.AllSchemas)
 			if err != nil {
 				return err
 			}
@@ -64,6 +68,8 @@ func connsCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	test.Flags().DurationVar(&timeout, "timeout", 2*time.Minute, "give up after")
 
 	var schema string
 	discover := &cobra.Command{
