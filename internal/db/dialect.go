@@ -153,6 +153,9 @@ func (postgres) TableExists(t Table, def string) (string, []any) {
 		[]any{cmp.Or(t.Schema, def, "public"), t.Name}
 }
 func (postgres) ListTables(schema, def string) (string, []any) {
+	if schema == AllSchemas {
+		return "SELECT table_schema, table_name FROM information_schema.tables WHERE table_type IN ('BASE TABLE','VIEW') ORDER BY 1, 2", nil
+	}
 	return "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = $1 AND table_type IN ('BASE TABLE','VIEW') ORDER BY 2",
 		[]any{cmp.Or(schema, def, "public")}
 }
@@ -238,6 +241,9 @@ func (mysql) TableExists(t Table, def string) (string, []any) {
 	return "SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", []any{t.Name}
 }
 func (mysql) ListTables(schema, def string) (string, []any) {
+	if schema == AllSchemas {
+		return "SELECT table_schema, table_name FROM information_schema.tables ORDER BY 1, 2", nil
+	}
 	if s := cmp.Or(schema, def); s != "" {
 		return "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = ? ORDER BY 2", []any{s}
 	}
@@ -329,6 +335,9 @@ func (mssql) TableExists(t Table, def string) (string, []any) {
 		[]any{cmp.Or(t.Schema, def, "dbo"), t.Name}
 }
 func (mssql) ListTables(schema, def string) (string, []any) {
+	if schema == AllSchemas {
+		return "SELECT table_schema, table_name FROM information_schema.tables ORDER BY 1, 2", nil
+	}
 	return "SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema = @p1 ORDER BY 2",
 		[]any{cmp.Or(schema, def, "dbo")}
 }

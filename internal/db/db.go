@@ -144,24 +144,39 @@ func (d *DB) ListSchemas(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
-// ListAllTables lists the tables and views of every schema from ListSchemas, in that
-// order; without schemas, those of the default schema.
+// AllSchemas as the schema of ListTables lists every schema in one query, system
+// schemas left out, ordered by schema then name.
+const AllSchemas = "*"
+
+// ListAllTables lists the tables and views of every schema the connection can read,
+// the connection's schema first, then by schema and name.
 func (d *DB) ListAllTables(ctx context.Context) ([]Table, error) {
-	schemas, err := d.ListSchemas(ctx)
+	if !d.Dialect.HasSchemas() {
+		return d.ListTables(ctx, "")
+	}
+	all, err := d.ListTables(ctx, AllSchemas)
 	if err != nil {
 		return nil, err
 	}
-	if len(schemas) == 0 {
-		schemas = []string{""}
-	}
-	var out []Table
-	for _, s := range schemas {
-		ts, err := d.ListTables(ctx, s)
-		if err != nil {
-			return nil, err
+	out := all[:0]
+	for _, t := range all {
+		low := strings.ToLower(t.Schema)
+		if slices.Contains(systemSchemas, low) || strings.HasPrefix(low, "pg_") {
+			continue
 		}
-		out = append(out, ts...)
+		out = append(out, t)
 	}
+	slices.SortStableFunc(out, func(a, b Table) int {
+		switch {
+		case a.Schema == b.Schema:
+			return 0
+		case a.Schema == d.Schema:
+			return -1
+		case b.Schema == d.Schema:
+			return 1
+		}
+		return strings.Compare(a.Schema, b.Schema)
+	})
 	return out, nil
 }
 

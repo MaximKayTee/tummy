@@ -25,7 +25,7 @@ type Result struct {
 }
 
 // AllSchemas as the schema of Conn lists the tables of every schema.
-const AllSchemas = "*"
+const AllSchemas = db.AllSchemas
 
 // Conn tests c as loaded from connections.toml: ${VAR} references are resolved and a
 // relative sqlite path is resolved against c.Dir. schema limits the table list; "" is
