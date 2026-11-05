@@ -586,7 +586,6 @@ func TestRepWizardFlow(t *testing.T) {
 	w.basics.set("name", "fresh")
 	w.basics.set("source", "SRC")
 	w.basics.set("target", "TGT")
-	w.basics.set("mode", "incremental")
 	w.basics.set("schedule", "custom")
 	w.basics.set("cron", "nonsense")
 	if res := send(t, w, keySave); res != wizContinue || w.basics.field("cron").err == "" {
@@ -594,9 +593,10 @@ func TestRepWizardFlow(t *testing.T) {
 	}
 	w.basics.set("cron", "@every 10m")
 	walk(t, w)
-	if w.step != stepDefaults || w.draft.Schedule != "@every 10m" || w.draft.Defaults.Mode != "incremental" {
+	if w.step != stepDefaults || w.draft.Schedule != "@every 10m" {
 		t.Fatalf("basics applied: step=%d %+v", w.step, w.draft)
 	}
+	w.defaults.set("mode", "incremental")
 	w.defaults.set("primary_key", "id")
 	w.defaults.set("exclude", "tmp_*, x_*")
 	walk(t, w)
@@ -714,8 +714,8 @@ func TestRepWizardFlow(t *testing.T) {
 	w3, _ := newRepWizard(opts, conns, "")
 	w3.basics.set("name", "bad")
 	w3.basics.set("source", "SRC")
-	w3.basics.set("mode", "incremental")
 	walk(t, w3)
+	w3.defaults.set("mode", "incremental")
 	walk(t, w3)
 	send(t, w3, keyRunes("a"))
 	for _, r := range "things" {

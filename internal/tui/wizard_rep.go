@@ -284,7 +284,6 @@ func (w *repWizard) buildBasics() {
 		}),
 		choice("source", "Source", "", sources...).def(src).notes(notes).actions(newConnRow).required(),
 		choice("target", "Target", "", targets...).def(tgt).notes(notes).actions(newConnRow).required(),
-		choice("mode", "Mode", "default of every stream", config.Modes...).def(cmp.Or(d.Defaults.Mode, "full-refresh")),
 		choice("schedule", "Schedule", "", labels...).def(preset).notes(cronNotes).helpFn(func(f *form) string {
 			return nextRunHelp(scheduleOf(f))
 		}),
@@ -343,7 +342,6 @@ func (w *repWizard) basicsInto(d *config.ReplicationDraft) {
 		w.tgtTables = nil
 	}
 	d.Name, d.Source, d.Target = f.get("name"), f.get("source"), f.get("target")
-	d.Defaults.Mode = f.get("mode")
 	d.Enabled = f.on("enabled")
 	d.Schedule = scheduleOf(f)
 }
@@ -355,7 +353,7 @@ func (w *repWizard) applyBasics() {
 }
 
 // defaultsFields are the replication-wide keys the defaults step edits.
-var defaultsKeys = []string{"primary_key", "update_key", "object", "records", "paginate", "page_size", "page_param", "size_param", "cursor_field", "cursor_param"}
+var defaultsKeys = []string{"mode", "primary_key", "update_key", "object", "records", "paginate", "page_size", "page_param", "size_param", "cursor_field", "cursor_param"}
 
 func (w *repWizard) buildDefaults() {
 	api := w.isAPI()

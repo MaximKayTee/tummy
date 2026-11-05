@@ -219,9 +219,9 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 			}
 			return optionExamples[f.get("type")] + "   driver parameters"
 		}),
-		toggle("read_only", "Read only", "never a target", c.ReadOnly).when(func(f *form) bool { return !isAPI(f) }),
 		combo("schema", "Schema", "for unqualified table names; ctrl+g lists them", "").empty("default").eg("public   dbo").def(c.Schema).when(isDB),
 		text("path", "Path", "relative to "+dir).eg("shop.db").def(c.Path).when(func(f *form) bool { return f.get("type") == "sqlite" }).required(),
+		toggle("read_only", "Read only", "never a target", c.ReadOnly).when(func(f *form) bool { return !isAPI(f) }),
 		text("base_url", "Base URL", "stream paths are appended").eg("https://api.example.com/v1").def(c.BaseURL).when(isAPI).required(),
 		choice("auth", "Auth", "", "", "bearer", "basic", "header", "query").empty("none").def(c.Auth).when(isAPI),
 		secret("token", "Token", "${VAR}: environment").eg("${API_TOKEN}").def(c.Token).when(authIs("bearer")).required(),
