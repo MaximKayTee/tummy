@@ -62,6 +62,15 @@ func (e *Engine) Plan(ctx context.Context, r *config.Replication) ([]PlanRow, er
 			return nil, err
 		}
 	}
+	// the target's tables once, not one lookup per stream: a wildcard can be thousands
+	listed, err := tgt.ListAllTables(ctx)
+	if err != nil {
+		return nil, err
+	}
+	have := map[string]bool{}
+	for _, t := range listed {
+		have[t.String()] = true
+	}
 	var out []PlanRow
 	for _, s := range streams {
 		target := targetTable(tgt, s)
@@ -71,8 +80,10 @@ func (e *Engine) Plan(ctx context.Context, r *config.Replication) ([]PlanRow, er
 			out = append(out, row)
 			continue
 		}
-		exists, err := tgt.TableExists(ctx, target)
-		if err != nil {
+		var exists bool
+		if target.Schema != "" || !tgt.Dialect.HasSchemas() {
+			exists = have[target.String()]
+		} else if exists, err = tgt.TableExists(ctx, target); err != nil { // default schema: the engine knows it
 			row.Err = err.Error()
 			out = append(out, row)
 			continue

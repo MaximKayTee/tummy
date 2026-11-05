@@ -214,7 +214,7 @@ func (w *repWizard) discoverCols() tea.Cmd {
 	}
 	w.colsAsked = true
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		out := map[string][]db.Column{}
 		d, err := db.Open(ctx, c.DB())

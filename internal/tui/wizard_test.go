@@ -1327,3 +1327,37 @@ func TestReadOnlyConnNotATarget(t *testing.T) {
 		t.Fatal("form toggle off")
 	}
 }
+
+func TestTabPastTheEndMovesSteps(t *testing.T) {
+	opts := testHome(t)
+	conns, _ := config.LoadConnections(opts.Connections)
+	w, _ := newRepWizard(opts, conns, "")
+	w.basics.set("name", "tabby")
+	w.basics.set("source", "SRC")
+	w.basics.set("target", "TGT")
+	last := len(w.basics.visible()) - 1
+	for i := 0; i < last; i++ {
+		send(t, w, keyTab)
+	}
+	if w.step != stepBasics {
+		t.Fatal("tab within the form stays")
+	}
+	send(t, w, keyTab)
+	if w.step != stepDefaults {
+		t.Fatalf("tab past the last field: step %d", w.step)
+	}
+	send(t, w, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if w.step != stepBasics {
+		t.Fatalf("shift+tab before the first field: step %d", w.step)
+	}
+	send(t, w, keyTab)
+	walk(t, w) // defaults -> streams
+	send(t, w, keyTab)
+	if w.step != stepReview {
+		t.Fatalf("tab on the streams step: %d", w.step)
+	}
+	send(t, w, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if w.step != stepStreams {
+		t.Fatalf("shift+tab on review: %d", w.step)
+	}
+}

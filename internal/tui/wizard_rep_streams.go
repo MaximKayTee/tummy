@@ -170,7 +170,7 @@ func (w *repWizard) edit(i int) tea.Cmd {
 	w.colsFor = sd.Name
 	table := sd.Name
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		d, err := db.Open(ctx, c.DB())
 		if err != nil {

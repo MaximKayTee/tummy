@@ -401,6 +401,8 @@ const (
 	formContinue formResult = iota
 	formSubmit
 	formCancel
+	formNext // tab on the last field: the host may move on
+	formPrev // shift+tab on the first field: the host may move back
 )
 
 // update handles a key. Submit happens on ctrl+s, or enter on the last field. A change
@@ -452,9 +454,19 @@ func (f *form) handle(msg tea.KeyMsg) (formResult, tea.Cmd) {
 			return formSubmit, nil
 		}
 		return formContinue, f.focus()
-	case "up", "shift+tab":
+	case "up":
 		return formContinue, f.move(-1)
-	case "down", "tab":
+	case "shift+tab":
+		if f.cur == 0 {
+			return formPrev, nil
+		}
+		return formContinue, f.move(-1)
+	case "down":
+		return formContinue, f.move(1)
+	case "tab":
+		if f.cur >= len(f.visible())-1 {
+			return formNext, nil
+		}
 		return formContinue, f.move(1)
 	case "pgup":
 		return formContinue, f.move(-5)
