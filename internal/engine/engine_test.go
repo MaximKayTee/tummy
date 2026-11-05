@@ -759,3 +759,12 @@ func TestPlanDoesNotWrite(t *testing.T) {
 		t.Fatalf("customers: %+v", p)
 	}
 }
+
+func TestRunErrorNamesTheStream(t *testing.T) {
+	f := setup(t)
+	r := f.replication("source = \"SRC\"\ntarget = \"TGT\"\n[streams.nope]\n")
+	_, err := f.engine().Run(context.Background(), r, nil)
+	if err == nil || !strings.Contains(err.Error(), "1 of 1 streams failed: nope: ") {
+		t.Fatalf("summary should carry the stream's error: %v", err)
+	}
+}

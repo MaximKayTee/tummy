@@ -242,7 +242,11 @@ func (e *Engine) run(ctx context.Context, r *config.Replication, only []string) 
 		}
 	}
 	if failed > 0 {
-		return results, fmt.Errorf("%d of %d streams failed", failed, len(results))
+		for _, res := range results {
+			if res.Err != nil {
+				return results, fmt.Errorf("%d of %d streams failed: %s: %w", failed, len(results), res.Stream, res.Err)
+			}
+		}
 	}
 	return results, nil
 }

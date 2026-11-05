@@ -169,18 +169,18 @@ var optionNotes = map[string]string{
 }
 
 type form struct {
-	title   string
-	fields  []*field
-	cur     int    // index of the focused field in visible()
-	focused *field // stays focused when fields before it appear or go
-	drop    *picker
-	offset  int    // first body line shown when the form is taller than the screen
-	err     string // under the title, for the form as a whole
-	note    string // dim line under the title
-	action  string // "key:row" after an Actions row was picked; see takeAction
-	init    map[string]string
-	done    string // what enter on the last field does, for the footer; "" is apply
-	tabSteps bool  // tab and shift+tab leave the form as formNext / formPrev; ↓/↑ move fields
+	title    string
+	fields   []*field
+	cur      int    // index of the focused field in visible()
+	focused  *field // stays focused when fields before it appear or go
+	drop     *picker
+	offset   int    // first body line shown when the form is taller than the screen
+	err      string // under the title, for the form as a whole
+	note     string // dim line under the title
+	action   string // "key:row" after an Actions row was picked; see takeAction
+	init     map[string]string
+	done     string // what enter on the last field does, for the footer; "" is apply
+	tabSteps bool   // tab and shift+tab leave the form as formNext / formPrev; ↓/↑ move fields
 }
 
 const dropRows = 10

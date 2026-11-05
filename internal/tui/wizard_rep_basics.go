@@ -82,7 +82,6 @@ func (w *repWizard) buildBasics() {
 		toggle("enabled", "Enabled", "off: manual runs only", d.Enabled),
 	)
 	w.basics.done = "next"
-	w.basics.tabSteps = w.entry == entryFull
 }
 
 // scheduleOf is the cron expression the basics form describes.

@@ -1332,6 +1332,7 @@ func TestTabPastTheEndMovesSteps(t *testing.T) {
 	opts := testHome(t)
 	conns, _ := config.LoadConnections(opts.Connections)
 	w, _ := newRepWizard(opts, conns, "")
+	w.start() // the app always starts a wizard; start sets the entry's key behaviour
 	w.basics.set("name", "tabby")
 	w.basics.set("source", "SRC")
 	w.basics.set("target", "TGT")
@@ -1348,8 +1349,9 @@ func TestTabPastTheEndMovesSteps(t *testing.T) {
 		t.Fatalf("shift+tab: step %d", w.step)
 	}
 	// a stream edited on its own (E on the detail view) keeps tab as a field key
-	w2, _ := newEditStreamWizard(opts, conns, "alpha", "things")
-	if w2.stream == nil || w2.stream.tabSteps {
+	w2, _ := newEditStreamWizard(opts, conns, "alpha", "copy") // a sql stream: its form opens at once
+	run2(w2, w2.start())
+	if w2.stream == nil || w2.stream.tabSteps || w2.basics.tabSteps {
 		t.Fatal("single-stream wizard: tab is not a step key")
 	}
 	send(t, w, keyTab)
@@ -1361,5 +1363,21 @@ func TestTabPastTheEndMovesSteps(t *testing.T) {
 	send(t, w, tea.KeyMsg{Type: tea.KeyShiftTab})
 	if w.step != stepStreams {
 		t.Fatalf("shift+tab on review: %d", w.step)
+	}
+}
+
+// run2 runs a command and feeds its message back, once.
+func run2(w wizard, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if msg := cmd(); msg != nil {
+		if b, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range b {
+				run2(w, c)
+			}
+			return
+		}
+		w.update(msg)
 	}
 }

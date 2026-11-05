@@ -356,6 +356,7 @@ func (w *repWizard) result() statusMsg { return w.done }
 func (w *repWizard) saved() string     { return w.savedName }
 
 func (w *repWizard) start() tea.Cmd {
+	w.basics.tabSteps = w.entry == entryFull // the entry is known only after construction
 	switch w.entry {
 	case entryAdd:
 		w.step = stepStreams

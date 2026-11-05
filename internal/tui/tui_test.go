@@ -365,6 +365,9 @@ func TestDryRunPage(t *testing.T) {
 	m := loaded(t, testHome(t))
 	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
 	m = mm.(Model)
+	if m.view != viewRun || !m.planning || !strings.Contains(m.View(), "resolving") {
+		t.Fatalf("t should open the page at once, resolving shown:\n%s", m.View())
+	}
 	var plan planMsg
 	found := false
 	for _, msg := range runBatch(t, cmd) {
@@ -388,5 +391,17 @@ func TestDryRunPage(t *testing.T) {
 	m = mm.(Model)
 	if m.view != viewList || m.planName != "" {
 		t.Fatalf("esc: view %d plan %q", m.view, m.planName)
+	}
+	// r on the plan page runs it and shows the detail view, where streams report progress
+	mm, _ = m.Update(plan)
+	m = mm.(Model)
+	mm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = mm.(Model)
+	mm, _ = m.Update(plan)
+	m = mm.(Model)
+	mm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	m = mm.(Model)
+	if m.view != viewDetail || m.repName != "alpha" || cmd == nil {
+		t.Fatalf("r from the plan: view %d rep %q", m.view, m.repName)
 	}
 }

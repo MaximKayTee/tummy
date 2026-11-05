@@ -298,6 +298,9 @@ func (m Model) shortHelp() string {
 	case viewHistory:
 		return helpLine("enter", "details", "/", "filter")
 	case viewRun:
+		if m.planning {
+			return helpLine("esc", "back")
+		}
 		if m.planName != "" {
 			return helpLine("r", "run", "↑/↓ pgup/pgdn", "scroll")
 		}
@@ -897,6 +900,9 @@ func runText(r state.Run, width int) string {
 }
 
 func (m Model) runView() []string {
+	if m.planning {
+		return []string{"", "  " + sWarn.Render(m.spin.View()+" resolving streams") + sDim.Render("  "+txt.Dur(time.Since(m.planStart).Round(time.Second)))}
+	}
 	m.vp.Height = max(m.bodyHeight()-1, 3)
 	return append([]string{""}, strings.Split(m.vp.View(), "\n")...)
 }

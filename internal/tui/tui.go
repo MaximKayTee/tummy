@@ -84,8 +84,10 @@ type Model struct {
 	runs       []state.Run
 	runsErr    error
 	run        state.Run
-	runFrom    view   // where esc on a run goes
-	planName   string // the run page shows a dry run of this replication
+	runFrom    view      // where esc on a run goes
+	planName   string    // the run page shows a dry run of this replication
+	planning   bool      // the dry run is still resolving
+	planStart  time.Time // for the elapsed time while planning
 	vp         viewport.Model
 
 	connResults map[string]connTestMsg
@@ -221,8 +223,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case planMsg:
+		if !m.planning || m.planName != msg.Replication {
+			return m, nil // left the page meanwhile
+		}
 		if msg.Err != nil {
-			return m, status(msg.Replication+": "+txt.FirstLine(msg.Err.Error()), true)
+			m.planning = false
+			m.vp.SetContent(sErr.Render(glyphErr + " " + txt.Clean(txt.FirstLine(msg.Err.Error()))))
+			return m, nil
 		}
 		return m.openPlan(msg), nil
 	case runDoneMsg:
@@ -590,6 +597,11 @@ func (m Model) handleKeyInner(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.run.Stream != "*" {
 				streams = []string{m.run.Stream}
 			}
+			if m.planName != "" { // from a dry run: watch it on the detail view
+				m.planName, m.planning = "", false
+				m.repName, m.streamName, m.view = rep.Name, "", viewDetail
+				m.cursor[viewDetail], m.offset[viewDetail] = 0, 0
+			}
 			return m.startRun(rep, streams)
 		case key.Matches(msg, keys.Edit):
 			return m.editFromRun(m.run)
@@ -650,7 +662,7 @@ func (m Model) keyList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Run) && ok:
 		return m.startRun(cur, nil)
 	case key.Matches(msg, keys.Test) && ok:
-		return m, m.planNow(cur)
+		return m.startPlan(cur)
 	case key.Matches(msg, keys.Toggle) && ok:
 		return m, tea.Sequence(m.toggleEnabled(cur), m.loadSnapshot())
 	case key.Matches(msg, keys.Cancel) && ok:
@@ -706,7 +718,7 @@ func (m Model) keyDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Run):
 		return m.startRun(rep, nil)
 	case key.Matches(msg, keys.Test):
-		return m, m.planNow(rep)
+		return m.startPlan(rep)
 	case key.Matches(msg, keys.RunStream) && hasStream && stream != "*":
 		return m.startRun(rep, []string{stream})
 	case key.Matches(msg, keys.Toggle):
@@ -753,12 +765,23 @@ func (m Model) askCancel(rep replication) Model {
 }
 
 // openRun shows one run; esc goes back to the current view.
-// openPlan shows a dry run on the run page; r there runs it for real.
-func (m Model) openPlan(p planMsg) Model {
-	m.run, m.runFrom, m.planName = state.Run{Replication: p.Replication, Stream: "*"}, m.view, p.Replication
+// startPlan opens the run page at once, resolving shown until the plan arrives.
+func (m Model) startPlan(rep replication) (tea.Model, tea.Cmd) {
+	if rep.Err != "" || rep.ConnErr != "" {
+		return m, m.planNow(rep)
+	}
+	m.run, m.runFrom, m.planName = state.Run{Replication: rep.Name, Stream: "*"}, m.view, rep.Name
+	m.planning, m.planStart = true, time.Now()
 	m.view = viewRun
 	m.vp.Width = max(m.width-4, 10)
 	m.vp.Height = max(m.bodyHeight()-2, 3)
+	m.vp.SetContent("")
+	return m, m.planNow(rep)
+}
+
+// openPlan fills the run page with a dry run; r there runs it for real.
+func (m Model) openPlan(p planMsg) Model {
+	m.planning = false
 	m.vp.SetContent(planText(p.Rows, m.vp.Width))
 	m.vp.GotoTop()
 	return m
@@ -894,7 +917,7 @@ func (m Model) back() Model {
 		if m.planName != "" {
 			m.view = m.runFrom // the list is the zero view
 		}
-		m.planName = ""
+		m.planName, m.planning = "", false
 	}
 	m.filter.SetValue("")
 	m.clampCursor()
