@@ -490,10 +490,7 @@ func (e *explorer) keyPreview(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	case "esc", "q":
 		return e.leave()
 	case "left", "h":
-		if e.colCur == 0 {
-			return e.leave()
-		}
-		e.colCur--
+		e.colCur = max(e.colCur-1, 0)
 	case "right", "l":
 		e.colCur = min(e.colCur+1, max(len(e.cols)-1, 0))
 	case "up", "k":

@@ -1106,26 +1106,21 @@ func TestEnterOnUnloadedStreamPreviews(t *testing.T) {
 	}
 }
 
-func TestLeftLeavesPreviewFromFirstColumn(t *testing.T) {
+func TestLeftStaysInPreview(t *testing.T) {
 	opts := testHome(t)
 	e := openThings(t, opts)
 	e.update(keyRight)
 	if res, _ := e.update(tea.KeyMsg{Type: tea.KeyLeft}); res != wizContinue || e.colCur != 0 {
 		t.Fatal("left moves one column first")
 	}
-	if res, _ := e.update(tea.KeyMsg{Type: tea.KeyLeft}); res != wizContinue || e.page != pageTables {
-		t.Fatalf("left on the first column goes back to tables: %d", e.page)
+	if res, _ := e.update(tea.KeyMsg{Type: tea.KeyLeft}); res != wizContinue || e.page != pagePreview || e.colCur != 0 {
+		t.Fatalf("left on the first column stays: page %d col %d", e.page, e.colCur)
+	}
+	if res, _ := e.update(tea.KeyMsg{Type: tea.KeyEsc}); res != wizContinue || e.page != pageTables {
+		t.Fatalf("esc goes back to tables: %d", e.page)
 	}
 	if res, _ := e.update(tea.KeyMsg{Type: tea.KeyLeft}); res != wizCancel {
 		t.Fatal("left on the table list leaves the explorer")
-	}
-	// opened from a stream: left on the first column leaves straight away
-	m := loaded(t, opts)
-	m = press(m, "enter", "p")
-	e2 := m.wiz.(*explorer)
-	run(e2, e2.start())
-	if res, _ := e2.update(tea.KeyMsg{Type: tea.KeyLeft}); res != wizCancel {
-		t.Fatal("left leaves a stream preview")
 	}
 }
 
