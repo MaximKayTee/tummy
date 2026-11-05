@@ -1134,14 +1134,16 @@ func TestAddStreamFormUsesPickers(t *testing.T) {
 	e.repPick.set("target", "TGT")
 	e.update(keySave)
 	f := e.stream
-	if f.field("primary_key").Kind != kindMulti || f.field("update_key").Kind != kindSelect || f.field("select").Kind != kindMulti {
+	if f.field("primary_key").Kind != kindMulti || f.field("update_key").Kind != kindSelect {
 		t.Fatal("field kinds")
 	}
-	if got := strings.Join(f.picked("select"), ","); got != "id" {
-		t.Fatalf("columns follow the ticks: %s", got)
+	// sql, columns and steps are the preview's: not on the form
+	for _, k := range []string{"sql", "select", "steps"} {
+		if f.field(k) != nil {
+			t.Fatalf("%s on the form", k)
+		}
 	}
-	// the stream form of the wizard: sql, where and steps are there too
-	for _, k := range []string{"sql", "where", "steps", "object"} {
+	for _, k := range []string{"where", "object"} {
 		if f.field(k) == nil {
 			t.Fatalf("no %s", k)
 		}

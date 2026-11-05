@@ -20,7 +20,6 @@ import (
 	"tummy/internal/config"
 	"tummy/internal/db"
 	"tummy/internal/engine"
-	"tummy/internal/steps"
 )
 
 var schedulePresets = []struct{ label, expr string }{
@@ -144,6 +143,7 @@ type repWizard struct {
 	sampling   bool // fetching an API stream's first page
 
 	child      *connWizard // new connection from the source or target list
+	explore    *explorer   // a draft stream opened on its data: sql, columns, steps
 	childField string
 
 	ask        *wizAsk
@@ -524,6 +524,8 @@ func (w *repWizard) footer() (string, string) {
 		return sWarn.Render(txt.Clean(w.ask.text)), helpLine("esc", "back")
 	case w.child != nil:
 		return w.child.footer()
+	case w.explore != nil:
+		return w.explore.footer()
 	case w.pick != nil:
 		return helpLine(w.pick.hints()...), helpLine("esc", "cancel")
 	case w.stream != nil:
@@ -549,7 +551,7 @@ func (w *repWizard) footer() (string, string) {
 		if w.isAPI() {
 			add = "add endpoint"
 		}
-		return helpLine(append([]string{"a", add, "enter/E", "edit", "e", "on/off", "d", "delete", "ctrl+s", save}, jump...)...), helpLine("esc", "back")
+		return helpLine(append([]string{"a", add, "enter", "data, sql, steps", "E", "settings", "e", "on/off", "d", "delete", "ctrl+s", save}, jump...)...), helpLine("esc", "back")
 	}
 	return helpLine(append([]string{"ctrl+s", "save", "↑/↓ pgup/pgdn", "scroll"}, jump...)...), helpLine("esc", "back")
 }
@@ -560,6 +562,8 @@ func (w *repWizard) typing() bool {
 		return false
 	case w.child != nil:
 		return w.child.typing()
+	case w.explore != nil:
+		return w.explore.typing()
 	case w.pick != nil:
 		return true
 	case w.stream != nil:
@@ -576,7 +580,7 @@ func (w *repWizard) typing() bool {
 
 func (w *repWizard) dirty() bool {
 	return w.touched || w.basics.changed() || (w.defaults != nil && w.defaults.changed()) ||
-		(w.stream != nil && w.stream.changed()) || (w.pick != nil && w.pick.changed()) || w.child != nil
+		(w.stream != nil && w.stream.changed()) || (w.pick != nil && w.pick.changed()) || w.child != nil || w.explore != nil
 }
 
 func (w *repWizard) keyHelp() (string, [][2]string) {
@@ -600,7 +604,7 @@ func (w *repWizard) keyHelp() (string, [][2]string) {
 			[2]string{"f2 / f3", "previous / next step"}, [2]string{"1 2 3 4", "step, when not typing"}, [2]string{"esc", "previous step; cancel on the first"})
 	}
 	if w.step == stepStreams {
-		rows = append(rows, [2]string{"a", "add tables or an endpoint"}, [2]string{"enter / E", "edit the stream"},
+		rows = append(rows, [2]string{"a", "add tables or an endpoint"}, [2]string{"enter", "the stream on its data: sql, columns, steps; ctrl+s saves into the draft"}, [2]string{"E", "settings: object, mode, keys, where, limit"},
 			[2]string{"e", "stream on/off"}, [2]string{"d", "delete the stream (y/n)"})
 	}
 	if w.step == stepReview {
@@ -657,6 +661,9 @@ func (w *repWizard) discover(role, name string) tea.Cmd {
 func (w *repWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 	if w.child != nil {
 		return w.childUpdate(msg)
+	}
+	if w.explore != nil {
+		return w.exploreUpdate(msg)
 	}
 	switch msg := msg.(type) {
 	case discoverMsg:
@@ -744,6 +751,34 @@ func (w *repWizard) refreshLists() {
 	}
 }
 
+// exploreUpdate runs the explorer on a draft stream; its saves land in the draft.
+func (w *repWizard) exploreUpdate(msg tea.Msg) (wizResult, tea.Cmd) {
+	res, cmd := w.explore.update(msg)
+	if res == wizContinue {
+		return wizContinue, cmd
+	}
+	if w.explore.draftSaved {
+		w.touched = true
+	}
+	w.explore = nil
+	return wizContinue, nil
+}
+
+// exploreStream opens draft stream i in the explorer, bound to the draft.
+func (w *repWizard) exploreStream(i int) tea.Cmd {
+	sd, ok := at(w.draft.Streams, i)
+	if !ok {
+		return nil
+	}
+	e, err := newDraftStreamExplorer(w.opts, &w.draft, sd)
+	if err != nil {
+		w.err = err.Error()
+		return nil
+	}
+	w.explore, w.err = e, ""
+	return e.start()
+}
+
 func (w *repWizard) childUpdate(msg tea.Msg) (wizResult, tea.Cmd) {
 	res, cmd := w.child.update(msg)
 	switch res {
@@ -795,7 +830,7 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	if k := msg.String(); w.entry == entryFull && len(k) == 1 && k >= "1" && k <= "4" && !w.typing() {
 		return w.jump(repStep(k[0] - '1'))
 	}
-	if k := msg.String(); w.entry == entryFull && w.child == nil && w.pick == nil && w.ask == nil && w.stream == nil && (k == "f2" || k == "f3") {
+	if k := msg.String(); w.entry == entryFull && w.child == nil && w.explore == nil && w.pick == nil && w.ask == nil && w.stream == nil && (k == "f2" || k == "f3") {
 		if k == "f2" {
 			return w.jump(max(w.step-1, stepBasics))
 		}
@@ -903,7 +938,11 @@ func (w *repWizard) keyStreams(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		w.cur = max(n-1, 0)
 	case "a":
 		return wizContinue, w.add()
-	case "enter", "E":
+	case "enter":
+		if w.cur < n {
+			return wizContinue, w.exploreStream(w.cur)
+		}
+	case "E":
 		if w.cur < n {
 			return wizContinue, w.edit(w.cur)
 		}
@@ -1425,19 +1464,8 @@ func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, ap
 			fs[len(fs)-2].Options = []string{"", s.ForEach}
 		}
 	} else {
-		sel := text("select", "Columns", "-notes: all but notes   blank: all").eg("id, name").def(strings.Join(s.Select, ", "))
-		if cols != nil {
-			sel = multi("select", "Columns", "", cols, s.Columns(cols)).fixed().notes(kindNotes(kinds))
-		}
-		fs = append(fs,
-			text("sql", "SQL", "replaces the table").eg("select … from …").def(s.SQL),
-			sel,
-			text("where", "Where", "source SQL").eg("status = 'paid'").def(s.Where),
-			text("steps", "Steps", "").eg("keep id, name | filter total > 10 | sort -id").def(s.Steps).check(func(v string) error {
-				_, err := steps.Parse(v)
-				return err
-			}),
-		)
+		// sql, columns and steps are shaped in explore, on the data
+		fs = append(fs, text("where", "Where", "source SQL").eg("status = 'paid'").def(s.Where))
 	}
 	fs = append(fs,
 		combo("object", "Object", "target table; {stream_table} {stream_schema} {stream_name}", "").empty("stream name").eg("analytics.{stream_table}").def(s.Object),
@@ -1678,6 +1706,9 @@ func (w *repWizard) save(d config.ReplicationDraft) error {
 func (w *repWizard) view(width, height int) []string {
 	if w.child != nil {
 		return w.child.view(width, height)
+	}
+	if w.explore != nil {
+		return w.explore.view(width, height)
 	}
 	var head []string
 	if w.entry == entryFull {

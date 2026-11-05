@@ -445,17 +445,13 @@ func TestStreamFieldsRoundTrip(t *testing.T) {
 	if got.PageParam != "" || got.SizeParam != "" || got.PageSize != 0 || got.UpdateKey != "nonempty_at" {
 		t.Fatalf("hidden by a change: %+v", got)
 	}
-	tbl := config.Stream{Mode: "full-refresh", Select: config.Names{"-notes"}, Where: "v <> 'none'", Limit: 5, QueryTimeout: "30s", Steps: "keep id"}
+	tbl := config.Stream{Mode: "full-refresh", Select: config.Names{"-notes"}, Where: "v <> 'none'", Limit: 5, QueryTimeout: "30s", Steps: "keep id", SQL: "select 1"}
 	f = newForm("t", streamFields(tbl, []string{"id", "v", "notes"}, false)...)
-	if got := strings.Join(f.picked("select"), ","); got != "id,v" {
-		t.Fatalf("select -notes ticks: %s", got)
+	if f.field("select") != nil || f.field("sql") != nil || f.field("steps") != nil {
+		t.Fatal("sql, select and steps are shaped in explore, not on the form")
 	}
 	if got := streamFromFields(f, tbl); !equalStream(got, tbl) {
-		t.Fatalf("table round trip:\n%+v\n%+v", got, tbl)
-	}
-	f.field("select").Picked["notes"] = true
-	if got := streamFromFields(f, tbl); got.Select != nil {
-		t.Fatalf("every column ticked: %v", got.Select)
+		t.Fatalf("table round trip keeps them:\n%+v\n%+v", got, tbl)
 	}
 	// the default stays unwritten
 	plain := config.Stream{}
@@ -640,21 +636,20 @@ func TestRepWizardFlow(t *testing.T) {
 	sf.set("mode", "snapshot")
 	send(t, w, keySave)
 	// a real table: columns are looked up and the keys become lists
-	send(t, w, keyRunes("g"), keyEnter)
+	send(t, w, keyRunes("g"), keyRunes("E"))
 	tf := w.stream
-	if tf == nil || tf.field("primary_key").Kind != kindMulti || tf.field("update_key").Kind != kindSelect || tf.field("select").Kind != kindMulti {
+	if tf == nil || tf.field("primary_key").Kind != kindMulti || tf.field("update_key").Kind != kindSelect {
 		t.Fatalf("table stream editor should use lists: %+v", tf)
 	}
-	if got := strings.Join(tf.field("select").Options, ","); got != "id,v" {
+	if got := strings.Join(tf.field("primary_key").Options, ","); got != "id,v" {
 		t.Fatalf("columns: %s", got)
 	}
-	if tf.field("where") == nil || tf.field("sql") == nil || tf.field("limit") == nil {
-		t.Fatal("where, sql and limit belong on the form")
+	if tf.field("where") == nil || tf.field("limit") == nil || tf.field("sql") != nil || tf.field("select") != nil {
+		t.Fatal("where and limit belong on the form; sql and columns in explore")
 	}
 	tf.field("primary_key").Picked["id"] = true
-	tf.field("select").Picked["v"] = false
 	send(t, w, keySave)
-	if st := w.draft.Streams[0].Stream; strings.Join(st.PrimaryKey, ",") != "id" || strings.Join(st.Select, ",") != "id" {
+	if st := w.draft.Streams[0].Stream; strings.Join(st.PrimaryKey, ",") != "id" {
 		t.Fatalf("picked keys: %+v", st)
 	}
 	if s := w.draft.Streams[1].Stream; s.UpdateKey != "updated_at" || s.Mode != "snapshot" {
@@ -1124,8 +1119,49 @@ func TestDetailEditOpensTheStream(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "enter", "j", "E") // alpha › copy
 	w, ok := m.wiz.(*repWizard)
-	if !ok || w.entry != entryEdit || w.stream == nil || w.stream.get("sql") != "select * from things" {
+	if !ok || w.entry != entryEdit || w.stream == nil || w.stream.field("sql") != nil || w.stream.get("mode") == "" {
 		t.Fatalf("E on a stream: %+v", m.wiz)
+	}
+}
+
+func TestWizardEnterExploresDraftStream(t *testing.T) {
+	opts := testHome(t)
+	conns, _ := config.LoadConnections(opts.Connections)
+	w, err := newRepWizard(opts, conns, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.basics.set("name", "draft")
+	w.basics.set("source", "SRC")
+	w.basics.set("target", "TGT")
+	walk(t, w)
+	walk(t, w)
+	send(t, w, keyRunes("a"))
+	for _, r := range "things" {
+		send(t, w, keyRunes(string(r)))
+	}
+	send(t, w, keyEnter)
+	if w.step != stepStreams || len(w.draft.Streams) != 1 || w.draft.Streams[0].Name != "things" {
+		t.Fatalf("setup: step %d streams %+v", w.step, w.draft.Streams)
+	}
+	send(t, w, keyRunes("g"), keyEnter) // first stream: things
+	e := w.explore
+	if e == nil || e.bound != &w.draft || e.page != pagePreview || e.streamName != "things" {
+		t.Fatalf("enter should explore the draft stream: %+v", e)
+	}
+	run(e, e.start())
+	e.update(keyRight)
+	e.update(keySpace) // untick v
+	send(t, w, keySave)
+	if !w.touched || strings.Join(w.draft.Streams[0].Stream.Select, ",") != "id" {
+		t.Fatalf("ctrl+s should save into the draft: %+v", w.draft.Streams[0].Stream)
+	}
+	send(t, w, keyEsc)
+	if w.explore != nil || w.step != stepStreams {
+		t.Fatalf("esc returns to the streams step: %v %d", w.explore, w.step)
+	}
+	if _, err := os.Stat(filepath.Join(config.ReplicationsDir(opts.Home), "draft.toml")); err == nil {
+		t.Fatal("nothing written to disk")
 	}
 }
 

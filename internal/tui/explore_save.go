@@ -65,7 +65,7 @@ func (e *explorer) saveBack() tea.Cmd {
 	} else {
 		d.Streams = append(d.Streams, sd)
 	}
-	if _, err := config.WriteReplication(e.opts.Home, d); err != nil {
+	if err := e.writeDraft(d); err != nil {
 		e.setNote(txt.Clean(txt.FirstLine(err.Error())), true)
 		return nil
 	}
@@ -86,6 +86,11 @@ func (e *explorer) wildcardBase(d config.ReplicationDraft) config.Stream {
 }
 
 func (e *explorer) loadDraft(rep string) (config.ReplicationDraft, error) {
+	if e.bound != nil {
+		d := *e.bound
+		d.Streams = slices.Clone(d.Streams)
+		return d, nil
+	}
 	path, err := config.ReplicationPath(e.opts.Home, rep)
 	if err != nil {
 		return config.ReplicationDraft{}, err
@@ -146,9 +151,23 @@ func (e *explorer) applyEdits(s *config.Stream, ticked []string, isNew bool) err
 
 // ---------- +: add to a replication ----------
 
+// writeDraft saves a replication: into the bound draft, else its file.
+func (e *explorer) writeDraft(d config.ReplicationDraft) error {
+	if e.bound != nil {
+		*e.bound = d
+		e.draftSaved = true
+		return nil
+	}
+	_, err := config.WriteReplication(e.opts.Home, d)
+	return err
+}
+
 func (e *explorer) toTargetPick() tea.Cmd {
 	if e.readOnly {
 		return nil
+	}
+	if e.bound != nil {
+		return e.toStreamForm()
 	}
 	files, _ := config.ListReplicationFiles(e.opts.Home)
 	var reps []string
@@ -192,7 +211,12 @@ func (e *explorer) toTargetPick() tea.Cmd {
 }
 
 func (e *explorer) toStreamForm() tea.Cmd {
-	rep := e.repPick.get("rep")
+	rep := newRepOption
+	if e.bound != nil {
+		rep = e.bound.Name
+	} else {
+		rep = e.repPick.get("rep")
+	}
 	if rep == newRepOption {
 		e.draft = config.ReplicationDraft{
 			Name: e.repPick.get("name"), Source: e.conn.Name, Target: e.repPick.get("target"),
@@ -201,7 +225,9 @@ func (e *explorer) toStreamForm() tea.Cmd {
 	} else {
 		d, err := e.loadDraft(rep)
 		if err != nil {
-			e.repPick.field("rep").err = txt.FirstLine(err.Error())
+			if e.repPick != nil {
+				e.repPick.field("rep").err = txt.FirstLine(err.Error())
+			}
 			return nil
 		}
 		e.draft = d
@@ -217,7 +243,11 @@ func (e *explorer) toStreamForm() tea.Cmd {
 		s = e.spec // the stream as opened, into another replication
 	}
 	if err := e.applyEdits(&s, e.tickedCols(), i < 0); err != nil {
-		e.repPick.err = err.Error()
+		if e.repPick != nil {
+			e.repPick.err = err.Error()
+		} else {
+			e.setNote(err.Error(), true)
+		}
 		return nil
 	}
 	e.formBase = s
@@ -361,7 +391,7 @@ func (e *explorer) saveStream() error {
 	} else {
 		e.draft.Streams = append(e.draft.Streams, sd)
 	}
-	if _, err := config.WriteReplication(e.opts.Home, e.draft); err != nil {
+	if err := e.writeDraft(e.draft); err != nil {
 		return err
 	}
 	e.done = statusMsg{Text: fmt.Sprintf("saved: %s.toml", e.draft.Name)}

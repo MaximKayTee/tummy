@@ -81,6 +81,8 @@ type explorer struct {
 	discarded  bool   // leaving was confirmed: dirty reports false from then on
 	repName    string // replication file, "" when unknown
 	streamName string
+	bound      *config.ReplicationDraft // a wizard's draft: saves go there, not to a file
+	draftSaved bool                     // a save landed in bound
 	origSelect []string
 	stepsErr   string // the stream's steps did not parse; saving would lose them
 	baseSteps  string
@@ -250,6 +252,24 @@ func newRepStreamExplorer(opts Options, rep, connName string, s config.ResolvedS
 	e.fromStream = true
 	e.streamName = s.Name
 	e.openSpec(s.Name, spec)
+	e.page = pagePreview
+	return e, nil
+}
+
+// newDraftStreamExplorer opens a stream of a wizard's draft; saves land in the draft.
+func newDraftStreamExplorer(opts Options, d *config.ReplicationDraft, sd config.StreamDraft) (*explorer, error) {
+	e, err := newExplorer(opts, d.Source)
+	if err != nil {
+		return nil, err
+	}
+	e.bound, e.repName, e.streamName, e.fromStream = d, d.Name, sd.Name, true
+	if strings.ContainsAny(sd.Name, "*?[") {
+		w := config.ResolvedStream{Name: sd.Name, Stream: sd.Stream}
+		e.wildcard = &w
+		e.filter.SetValue(wildPrefix(sd.Name))
+		return e, nil
+	}
+	e.openSpec(sd.Name, sd.Stream)
 	e.page = pagePreview
 	return e, nil
 }
