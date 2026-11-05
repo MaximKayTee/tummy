@@ -64,7 +64,7 @@ type explorer struct {
 	cur, offset int
 	filter      textinput.Model
 	filtering   bool
-	tableRows   int // table list: rows per screen, set by view
+	tableRows   int                    // table list: rows per screen, set by view
 	wildcard    *config.ResolvedStream // tables matching it open with its where, select and steps
 
 	// what is being previewed
