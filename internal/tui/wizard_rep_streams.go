@@ -38,7 +38,7 @@ func (w *repWizard) exploreSQL() tea.Cmd {
 		w.err = err.Error()
 		return nil
 	}
-	e.bound, e.repName, e.tables = &w.draft, w.draft.Name, w.srcTables
+	e.bound, e.repName, e.tables, e.fromStream = &w.draft, w.draft.Name, w.srcTables, true // esc: back to the step
 	e.resetPreview()
 	e.page = pagePreview
 	e.editSQL = true

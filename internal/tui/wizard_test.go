@@ -1200,6 +1200,10 @@ func TestWizardEnterExploresDraftStream(t *testing.T) {
 	}
 	e.stream.set("name", "big_things")
 	send(t, w, keySave)
+	send(t, w, keyEsc)
+	if w.explore != nil || w.step != stepStreams {
+		t.Fatalf("esc from the query returns to the streams step, not the table list: %v %d", w.explore, w.step)
+	}
 	if len(w.draft.Streams) != 2 || w.draft.Streams[1].Name != "big_things" || w.draft.Streams[1].Stream.SQL != "select id from things where id > 1" {
 		t.Fatalf("query stream in the draft: %+v", w.draft.Streams)
 	}
