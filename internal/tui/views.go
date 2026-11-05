@@ -291,7 +291,7 @@ func joinFooter(left, right string, width int) string {
 func (m Model) shortHelp() string {
 	switch m.view {
 	case viewList:
-		return helpLine("enter", "open", "n", "new", "E", "edit", "r", "run", "t", "dry run", "e", "on/off", "d", "delete", "c", "connections", "H", "history", "/", "filter")
+		return helpLine("enter", "open", "n", "new", "E", "edit", "D", "duplicate", "r", "run", "t", "dry run", "e", "on/off", "d", "delete", "c", "connections", "H", "history", "/", "filter")
 	case viewDetail:
 		pairs := []string{"E", "edit", "a", "add", "r", "run", "t", "dry run", "s", "run stream", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
 		if rep, ok := m.rep(m.repName); ok && rep.Running > 0 {
@@ -373,7 +373,7 @@ func (m Model) helpPages() []helpPage {
 		section("anywhere", [][2]string{{"f1", "help"}, {"?", "help, when not typing"}, {"ctrl+c", "quit; asks when there are changes or runs"}, {"ctrl+z", "suspend; fg resumes"}})
 	case viewList:
 		section("replications", [][2]string{
-			{"enter", "streams of the replication"}, {"n", "new replication"}, {"E", "edit"}, {"e", "on/off for the daemon"},
+			{"enter", "streams of the replication"}, {"n", "new replication"}, {"E", "edit"}, {"D", "duplicate: a new replication with its streams and defaults"}, {"e", "on/off for the daemon"},
 			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"t", "dry run: target table, action, source query and columns per stream, nothing written"}, {"x", "cancel a running run (y/n)"}, {"H", "run history"}, {"c", "connections"},
 		})
 	case viewDetail:

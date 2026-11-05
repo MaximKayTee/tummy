@@ -658,7 +658,7 @@ func TestRepWizardFlow(t *testing.T) {
 	if v := strings.Join(w.view(100, 20), "\n"); !strings.Contains(v, "update_key=updated_at") {
 		t.Fatalf("overrides column:\n%s", v)
 	}
-	// e turns a stream off; d asks; backspace only goes back
+	// e turns a stream off; d asks; f2 goes back a step
 	send(t, w, keyRunes("e"))
 	if !w.draft.Streams[0].Stream.Disabled {
 		t.Fatal("e: stream off")
@@ -671,9 +671,9 @@ func TestRepWizardFlow(t *testing.T) {
 	if len(w.draft.Streams) != 2 {
 		t.Fatal("n keeps the stream")
 	}
-	send(t, w, keyBack)
+	send(t, w, tea.KeyMsg{Type: tea.KeyF2})
 	if w.step != stepDefaults || len(w.draft.Streams) != 2 {
-		t.Fatalf("backspace: step %d, %d streams", w.step, len(w.draft.Streams))
+		t.Fatalf("f2: step %d, %d streams", w.step, len(w.draft.Streams))
 	}
 	walk(t, w)
 	// review and save
@@ -1328,41 +1328,93 @@ func TestReadOnlyConnNotATarget(t *testing.T) {
 	}
 }
 
-func TestTabPastTheEndMovesSteps(t *testing.T) {
+func TestF2F3MoveSteps(t *testing.T) {
 	opts := testHome(t)
 	conns, _ := config.LoadConnections(opts.Connections)
 	w, _ := newRepWizard(opts, conns, "")
-	w.start() // the app always starts a wizard; start sets the entry's key behaviour
+	w.start()
 	w.basics.set("name", "tabby")
 	w.basics.set("source", "SRC")
 	w.basics.set("target", "TGT")
-	send(t, w, keyDown)
+	send(t, w, keyTab)
 	if w.step != stepBasics || w.basics.cur != 1 {
-		t.Fatal("down moves a field")
+		t.Fatal("tab moves a field")
 	}
-	send(t, w, keyTab)
+	send(t, w, tea.KeyMsg{Type: tea.KeyShiftTab})
+	if w.step != stepBasics || w.basics.cur != 0 {
+		t.Fatal("shift+tab moves a field back")
+	}
+	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
 	if w.step != stepDefaults {
-		t.Fatalf("tab from any field: step %d", w.step)
+		t.Fatalf("f3: step %d", w.step)
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyShiftTab})
+	send(t, w, tea.KeyMsg{Type: tea.KeyF2})
 	if w.step != stepBasics {
-		t.Fatalf("shift+tab: step %d", w.step)
+		t.Fatalf("f2: step %d", w.step)
 	}
-	// a stream edited on its own (E on the detail view) keeps tab as a field key
-	w2, _ := newEditStreamWizard(opts, conns, "alpha", "copy") // a sql stream: its form opens at once
-	run2(w2, w2.start())
-	if w2.stream == nil || w2.stream.tabSteps || w2.basics.tabSteps {
-		t.Fatal("single-stream wizard: tab is not a step key")
-	}
-	send(t, w, keyTab)
+	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
 	walk(t, w) // defaults -> streams
-	send(t, w, keyTab)
+	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
 	if w.step != stepReview {
-		t.Fatalf("tab on the streams step: %d", w.step)
+		t.Fatalf("f3 on the streams step: %d", w.step)
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyShiftTab})
+	send(t, w, tea.KeyMsg{Type: tea.KeyF2})
 	if w.step != stepStreams {
-		t.Fatalf("shift+tab on review: %d", w.step)
+		t.Fatalf("f2 on review: %d", w.step)
+	}
+	// esc cancels on every step, never steps back
+	if res, _ := w.key(keyEsc); res != wizCancel {
+		t.Fatalf("esc on streams: %v", res)
+	}
+	send(t, w, tea.KeyMsg{Type: tea.KeyF2})
+	if res, _ := w.key(keyEsc); res != wizCancel || w.step != stepDefaults {
+		t.Fatalf("esc on defaults: %v, step %d", res, w.step)
+	}
+	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
+	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
+	if res, _ := w.key(keyEsc); res != wizCancel {
+		t.Fatalf("esc on review: %v", res)
+	}
+}
+
+func TestDuplicateReplication(t *testing.T) {
+	opts := testHome(t)
+	m := loaded(t, opts)
+	m = press(m, "D")
+	if m.view != viewWizard || !strings.Contains(m.View(), "Copy of alpha") {
+		t.Fatalf("D:\n%s", m.View())
+	}
+	w := m.wiz.(*repWizard)
+	if w.original != "" || w.draft.Name != "" || w.draft.From != "alpha" || len(w.draft.Streams) == 0 {
+		t.Fatalf("copy draft: original %q name %q from %q streams %d", w.original, w.draft.Name, w.draft.From, len(w.draft.Streams))
+	}
+	if w.dirty() {
+		t.Fatal("untouched copy is not dirty")
+	}
+	w.basics.set("name", "alpha")
+	w.basics.commit()
+	if w.basics.validate() {
+		t.Fatal("the source name exists")
+	}
+	w.basics.set("name", "delta")
+	w.basics.commit()
+	if !w.basics.validate() {
+		t.Fatal("a free name validates")
+	}
+	w.applyBasics()
+	w.defaultsInto(&w.draft)
+	if err := w.save(w.draft); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(config.ReplicationsDir(opts.Home), "alpha.toml")); err != nil {
+		t.Fatalf("source kept: %v", err)
+	}
+	r, err := config.LoadReplicationRaw(filepath.Join(config.ReplicationsDir(opts.Home), "delta.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Name != "delta" || len(r.Streams) != len(w.orig.Streams) {
+		t.Fatalf("delta: name %q, %d streams, want %d", r.Name, len(r.Streams), len(w.orig.Streams))
 	}
 }
 

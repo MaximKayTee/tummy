@@ -425,6 +425,15 @@ func (m Model) addStream(name string) (tea.Model, tea.Cmd) {
 	return m.openWizard(w, err)
 }
 
+func (m Model) dupRep(name string) (tea.Model, tea.Cmd) {
+	conns, err := config.LoadConnections(m.opts.Connections)
+	if err != nil {
+		return m, status(err.Error(), true)
+	}
+	w, err := newDupRepWizard(m.opts, conns, name)
+	return m.openWizard(w, err)
+}
+
 func (m Model) editRep(name string) (tea.Model, tea.Cmd) {
 	conns, err := config.LoadConnections(m.opts.Connections)
 	if err != nil {
@@ -715,6 +724,8 @@ func (m Model) keyList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.newRep()
 	case key.Matches(msg, keys.Edit) && ok:
 		return m.editRep(cur.Name)
+	case key.Matches(msg, keys.Duplicate) && ok && cur.Err == "":
+		return m.dupRep(cur.Name)
 	case key.Matches(msg, keys.Delete) && ok:
 		m.ask = &confirm{text: "delete " + cur.Name + ".toml? y/n", onYes: func() tea.Cmd { return m.deleteRep(cur) }}
 		return m, nil

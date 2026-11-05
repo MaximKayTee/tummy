@@ -179,6 +179,20 @@ func newRepWizard(opts Options, conns *config.Connections, editing string) (*rep
 	return w, nil
 }
 
+// newDupRepWizard starts a new replication from NAME.toml: its streams and defaults,
+// no name yet. The new file is patched from the old one, comments and all.
+func newDupRepWizard(opts Options, conns *config.Connections, name string) (*repWizard, error) {
+	w, err := newRepWizard(opts, conns, name)
+	if err != nil {
+		return nil, err
+	}
+	w.original = ""
+	w.draft.Name = ""
+	w.orig = w.draft
+	w.buildBasics()
+	return w, nil
+}
+
 // newAddStreamWizard adds streams to an existing replication: the table list or the
 // endpoint form, then saves.
 func newAddStreamWizard(opts Options, conns *config.Connections, name string) (*repWizard, error) {
@@ -244,6 +258,9 @@ func (w *repWizard) title() string {
 	if w.original != "" {
 		return "edit " + w.original
 	}
+	if w.draft.From != "" {
+		return "copy of " + w.draft.From
+	}
 	return "new replication"
 }
 
@@ -274,13 +291,13 @@ func (w *repWizard) footer() (string, string) {
 	}
 	jump := []string{}
 	if w.entry == entryFull {
-		jump = []string{"tab/shift+tab", "step"}
+		jump = []string{"f2/f3", "step"}
 	}
 	switch w.step {
 	case stepBasics:
-		return helpLine(append(w.basics.hints(), "ctrl+s", save)...), helpLine("esc", escWord(w.basics, "cancel"))
+		return helpLine(append(append(w.basics.hints(), "ctrl+s", save), jump...)...), helpLine("esc", escWord(w.basics, "cancel"))
 	case stepDefaults:
-		return helpLine(append(w.defaults.hints(), "ctrl+s", save)...), helpLine("esc", escWord(w.defaults, "back"))
+		return helpLine(append(append(w.defaults.hints(), "ctrl+s", save), jump...)...), helpLine("esc", escWord(w.defaults, "cancel"))
 	case stepStreams:
 		add := "add tables"
 		if w.isAPI() {
@@ -293,9 +310,13 @@ func (w *repWizard) footer() (string, string) {
 		if len(w.draft.Streams) > 0 {
 			keys = append(keys, "enter", "data, sql, steps", "E", "settings", "e", "on/off", "d", "delete")
 		}
-		return helpLine(append(append(keys, "ctrl+s", save), jump...)...), helpLine("esc", "back")
+		return helpLine(append(append(keys, "ctrl+s", save), jump...)...), helpLine("esc", "cancel")
 	}
-	return helpLine(append([]string{"ctrl+s", "save", "↑/↓ pgup/pgdn", "scroll"}, jump...)...), helpLine("esc", "back")
+	back := "cancel"
+	if w.entry == entryAdd && w.beforePick != nil {
+		back = "back"
+	}
+	return helpLine(append([]string{"ctrl+s", "save", "↑/↓ pgup/pgdn", "scroll"}, jump...)...), helpLine("esc", back)
 }
 
 func (w *repWizard) typing() bool {
@@ -344,7 +365,7 @@ func (w *repWizard) keyHelp() (string, [][2]string) {
 	}
 	if w.entry == entryFull {
 		rows = append(rows, [2]string{"enter", "next field, next step on the last"}, [2]string{"ctrl+s", "review, then save"},
-			[2]string{"tab / shift+tab", "next / previous step"}, [2]string{"1 2 3 4", "step, when not typing"}, [2]string{"esc", "previous step; cancel on the first"})
+			[2]string{"f2 / f3", "previous / next step"}, [2]string{"1 2 3 4", "step, when not typing"}, [2]string{"esc", "cancel"})
 	}
 	if w.step == stepStreams {
 		rows = append(rows, [2]string{"a", "add tables or an endpoint"}, [2]string{"s", "a query on the source; + adds it as a stream"}, [2]string{"enter", "the stream on its data: sql, columns, steps; ctrl+s saves into the draft"}, [2]string{"E", "settings: object, mode, keys, where, limit"},
@@ -360,7 +381,6 @@ func (w *repWizard) result() statusMsg { return w.done }
 func (w *repWizard) saved() string     { return w.savedName }
 
 func (w *repWizard) start() tea.Cmd {
-	w.basics.tabSteps = w.entry == entryFull // the entry is known only after construction
 	switch w.entry {
 	case entryAdd:
 		w.step = stepStreams
@@ -576,8 +596,8 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	if k := msg.String(); w.entry == entryFull && len(k) == 1 && k >= "1" && k <= "4" && !w.typing() {
 		return w.jump(repStep(k[0] - '1'))
 	}
-	if k := msg.String(); w.entry == entryFull && w.child == nil && w.explore == nil && w.pick == nil && w.ask == nil && w.stream == nil && w.step >= stepStreams && (k == "tab" || k == "shift+tab") {
-		if k == "shift+tab" {
+	if k := msg.String(); w.entry == entryFull && w.child == nil && w.explore == nil && w.pick == nil && w.ask == nil && w.stream == nil && (k == "f2" || k == "f3") {
+		if k == "f2" {
 			return w.jump(max(w.step-1, stepBasics))
 		}
 		return w.jump(min(w.step+1, stepReview))
@@ -607,7 +627,7 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		switch res {
 		case formCancel:
 			return wizCancel, nil
-		case formSubmit, formNext:
+		case formSubmit:
 			w.basics.commit()
 			if !w.basics.validate() {
 				return wizContinue, w.basics.focus()
@@ -629,9 +649,8 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		switch res {
 		case formCancel:
 			w.applyDefaults()
-			w.step = stepBasics
-			return wizContinue, w.basics.focus()
-		case formSubmit, formNext:
+			return wizCancel, nil
+		case formSubmit:
 			w.defaults.commit()
 			if !w.defaults.validate() {
 				return wizContinue, w.defaults.focus()
@@ -639,25 +658,20 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			w.applyDefaults()
 			w.step = stepStreams
 			return wizContinue, w.enterStreams()
-		case formPrev:
-			return w.jump(stepBasics)
 		}
 		return wizContinue, cmd
 	case stepStreams:
 		return w.keyStreams(msg)
 	case stepReview:
 		switch msg.String() {
-		case "esc", "backspace":
-			w.step = stepStreams
+		case "esc":
 			if w.entry == entryAdd && w.beforePick != nil {
+				w.step = stepStreams
 				w.draft = *w.beforePick
 				w.pick, w.lastPick, w.beforePick = w.lastPick, nil, nil
 				return wizContinue, w.pick.filter.Focus()
 			}
-			if w.entry != entryFull {
-				return wizCancel, nil
-			}
-			return wizContinue, nil
+			return wizCancel, nil
 		case "ctrl+s":
 			if w.reviewErr != "" {
 				return wizContinue, nil

@@ -49,6 +49,8 @@ func (w *repWizard) buildBasics() {
 	title := "New replication"
 	if w.original != "" {
 		title = "Edit replication " + w.original
+	} else if d.From != "" {
+		title = "Copy of " + d.From
 	}
 	notes := connNotes(w.conns)
 	w.basics = newForm(title,
@@ -158,7 +160,6 @@ func (w *repWizard) buildDefaults() {
 	}
 	w.defaults = newForm("Defaults", fields...)
 	w.defaults.done = "next"
-	w.defaults.tabSteps = w.entry == entryFull
 }
 
 // seenCols lists the columns of the source tables read so far, for the defaults' keys.

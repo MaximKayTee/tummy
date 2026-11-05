@@ -169,18 +169,17 @@ var optionNotes = map[string]string{
 }
 
 type form struct {
-	title    string
-	fields   []*field
-	cur      int    // index of the focused field in visible()
-	focused  *field // stays focused when fields before it appear or go
-	drop     *picker
-	offset   int    // first body line shown when the form is taller than the screen
-	err      string // under the title, for the form as a whole
-	note     string // dim line under the title
-	action   string // "key:row" after an Actions row was picked; see takeAction
-	init     map[string]string
-	done     string // what enter on the last field does, for the footer; "" is apply
-	tabSteps bool   // tab and shift+tab leave the form as formNext / formPrev; ↓/↑ move fields
+	title   string
+	fields  []*field
+	cur     int    // index of the focused field in visible()
+	focused *field // stays focused when fields before it appear or go
+	drop    *picker
+	offset  int    // first body line shown when the form is taller than the screen
+	err     string // under the title, for the form as a whole
+	note    string // dim line under the title
+	action  string // "key:row" after an Actions row was picked; see takeAction
+	init    map[string]string
+	done    string // what enter on the last field does, for the footer; "" is apply
 }
 
 const dropRows = 10
@@ -405,8 +404,6 @@ const (
 	formContinue formResult = iota
 	formSubmit
 	formCancel
-	formNext // tab on the last field: the host may move on
-	formPrev // shift+tab on the first field: the host may move back
 )
 
 // update handles a key. Submit happens on ctrl+s, or enter on the last field. A change
@@ -461,16 +458,10 @@ func (f *form) handle(msg tea.KeyMsg) (formResult, tea.Cmd) {
 	case "up":
 		return formContinue, f.move(-1)
 	case "shift+tab":
-		if f.tabSteps {
-			return formPrev, nil
-		}
 		return formContinue, f.move(-1)
 	case "down":
 		return formContinue, f.move(1)
 	case "tab":
-		if f.tabSteps {
-			return formNext, nil
-		}
 		return formContinue, f.move(1)
 	case "pgup":
 		return formContinue, f.move(-5)
@@ -707,9 +698,6 @@ func (f *form) hints() []string {
 		return nil
 	}
 	next := []string{"tab/↓", "next"}
-	if f.tabSteps {
-		next = []string{"↓", "next"}
-	}
 	if last {
 		next = []string{"enter", f.doneWord()}
 	}

@@ -14,6 +14,7 @@ type keyMap struct {
 	Test                  key.Binding
 	Filter, Refresh       key.Binding
 	New, Edit, Delete     key.Binding
+	Duplicate             key.Binding
 	Add, Preview          key.Binding
 	Cancel, Create        key.Binding
 	Help, Quit            key.Binding
@@ -38,6 +39,7 @@ var keys = keyMap{
 	Refresh:   key.NewBinding(key.WithKeys("R")),
 	New:       key.NewBinding(key.WithKeys("n")),
 	Edit:      key.NewBinding(key.WithKeys("E")),
+	Duplicate: key.NewBinding(key.WithKeys("D")),
 	Delete:    key.NewBinding(key.WithKeys("d")),
 	Add:       key.NewBinding(key.WithKeys("a")),
 	Preview:   key.NewBinding(key.WithKeys("p")),

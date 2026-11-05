@@ -85,8 +85,8 @@ func (w *repWizard) exploreStream(i int) tea.Cmd {
 func (w *repWizard) keyStreams(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	n := len(w.draft.Streams)
 	switch msg.String() {
-	case "esc", "backspace":
-		return w.toDefaults()
+	case "esc":
+		return wizCancel, nil
 	case "up", "k":
 		w.cur = max(w.cur-1, 0)
 	case "down", "j":
