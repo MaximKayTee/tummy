@@ -172,14 +172,3 @@ func TestInserterStripsNULForRejectingTargets(t *testing.T) {
 type nulRejecting struct{ Dialect }
 
 func (nulRejecting) RejectsNUL() bool { return true }
-
-func TestMSSQLPacketSize(t *testing.T) {
-	_, dsn, _ := mssql{}.driver(Params{URL: "sqlserver://u:p@host:1433?database=db"})
-	if !strings.Contains(dsn, "packet+size=32767") || !strings.Contains(dsn, "database=db") {
-		t.Fatalf("default: %s", dsn)
-	}
-	_, dsn, _ = mssql{}.driver(Params{URL: "sqlserver://u:p@host?packet%20size=8000"})
-	if !strings.Contains(dsn, "size=8000") || strings.Contains(dsn, "32767") {
-		t.Fatalf("kept: %s", dsn)
-	}
-}

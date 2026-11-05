@@ -103,7 +103,6 @@ type Inserter struct {
 	table   Table
 	cols    []Column
 	perStmt int
-	copy    bool // postgres: COPY instead of INSERT
 	buf     []any
 	rows    int
 	Total   int64
@@ -121,11 +120,7 @@ type execer interface {
 func (d *DB) NewInserter(t Table, cols []Column) *Inserter {
 	per := d.Dialect.MaxParams() / max(len(cols), 1)
 	per = min(per, d.Dialect.MaxRows())
-	_, copy := d.Dialect.(postgres)
-	if copy {
-		per = copyRows
-	}
-	return &Inserter{Label: t.String(), db: d, ex: d.DB, table: t, cols: cols, perStmt: max(per, 1), copy: copy, strip: d.Dialect.RejectsNUL()}
+	return &Inserter{Label: t.String(), db: d, ex: d.DB, table: t, cols: cols, perStmt: max(per, 1), strip: d.Dialect.RejectsNUL()}
 }
 
 func (ins *Inserter) Add(ctx context.Context, row []any) error {
@@ -154,21 +149,14 @@ func (ins *Inserter) Add(ctx context.Context, row []any) error {
 	return nil
 }
 
-// Flush writes the buffered rows: one COPY on postgres, one multi-row INSERT
-// elsewhere. A failed batch is retried row by row to name the failing row; when
-// every row then succeeds, the batch counts as written.
+// Flush writes the buffered rows. A failed batch is retried row by row to name the
+// failing row; when every row then succeeds, the batch counts as written.
 func (ins *Inserter) Flush(ctx context.Context) error {
 	if ins.rows == 0 {
 		return nil
 	}
 	d := ins.db
-	var err error
-	if ins.copy {
-		err = ins.copyFlush(ctx)
-	} else {
-		_, err = ins.ex.ExecContext(ctx, InsertSQL(d.Dialect, ins.table, ins.cols, ins.rows), ins.buf...)
-	}
-	if err != nil {
+	if _, err := ins.ex.ExecContext(ctx, InsertSQL(d.Dialect, ins.table, ins.cols, ins.rows), ins.buf...); err != nil {
 		switch {
 		case ctx.Err() != nil:
 			return fmt.Errorf("%s: insert into %s: %w", d.Name, ins.Label, err)
