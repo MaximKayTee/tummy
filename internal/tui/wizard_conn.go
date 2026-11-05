@@ -423,7 +423,7 @@ func (w *connWizard) startProbe() tea.Cmd {
 func probeConn(c *config.Conn) connProbeMsg {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	res, err := probe.Conn(ctx, c, "")
+	res, err := probe.Conn(ctx, c, probe.AllSchemas)
 	msg := connProbeMsg{Name: c.Name, Tables: res.Tables, Err: err, Took: res.Took}
 	if err == nil && c.Type != "api" {
 		if x, err := c.Expanded(); err == nil {
@@ -545,11 +545,11 @@ func (w *connWizard) view(width, height int) []string {
 		out = append(out, strings.Split(sErrBox.Width(max(width-4, 20)).Render(txt.CleanText(w.probe.Err.Error())), "\n")...)
 	case w.probe != nil:
 		out = append(out, "  "+sOK.Render(glyphOK+" connected")+sDim.Render("  "+txt.Dur(w.probe.Took)))
-		if len(w.probe.Schemas) > 1 {
-			out = append(out, "  "+sDim.Render("schemas  ")+txt.Clean(strings.Join(w.probe.Schemas, ", ")))
-		}
 		if c.Type != "api" {
 			out = append(out, "", "  "+sHeader.Render(plural(len(w.probe.Tables), "table")))
+			if counts := schemaCounts(w.probe.Tables); len(counts) > 1 {
+				out = append(out, "  "+sDim.Render(txt.Clean(strings.Join(counts, "  "))))
+			}
 			shown := w.probe.Tables
 			if room := max(height-9, 0); len(shown) > room {
 				shown = shown[:room]
@@ -648,6 +648,27 @@ func queryPairs(q url.Values) map[string]string {
 		if k != "fedauth" && len(v) > 0 {
 			out[k] = v[0]
 		}
+	}
+	return out
+}
+
+// schemaCounts is "schema N" per schema in the order the tables come, "" left out.
+func schemaCounts(tables []string) []string {
+	var order []string
+	n := map[string]int{}
+	for _, t := range tables {
+		schema, _, ok := strings.Cut(t, ".")
+		if !ok {
+			continue
+		}
+		if n[schema] == 0 {
+			order = append(order, schema)
+		}
+		n[schema]++
+	}
+	var out []string
+	for _, s := range order {
+		out = append(out, fmt.Sprintf("%s %d", s, n[s]))
 	}
 	return out
 }
