@@ -49,9 +49,10 @@ func Conn(ctx context.Context, c *config.Conn, schema string) (Result, error) {
 	}
 	d, err := db.Open(ctx, x.DB())
 	if err != nil {
-		return Result{}, err
+		return Result{}, fmt.Errorf("conn %s: connect after %s: %s", x.Name, time.Since(start).Round(time.Millisecond), strings.TrimPrefix(err.Error(), "conn "+x.Name+": "))
 	}
 	defer d.Close()
+	connected := time.Now()
 	var tables []db.Table
 	if schema == AllSchemas {
 		tables, err = d.ListAllTables(ctx)
@@ -59,7 +60,7 @@ func Conn(ctx context.Context, c *config.Conn, schema string) (Result, error) {
 		tables, err = d.ListTables(ctx, schema)
 	}
 	if err != nil {
-		return Result{}, fmt.Errorf("conn %s: %w", x.Name, err)
+		return Result{}, fmt.Errorf("conn %s: list tables after %s, connected in %s: %w", x.Name, time.Since(start).Round(time.Millisecond), connected.Sub(start).Round(time.Millisecond), err)
 	}
 	res := Result{Took: time.Since(start)}
 	for _, t := range tables {
