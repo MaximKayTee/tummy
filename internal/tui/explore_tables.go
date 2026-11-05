@@ -87,6 +87,10 @@ func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		e.cur = max(e.cur-1, 0)
 	case "down", "j":
 		e.cur = min(e.cur+1, max(len(vis)-1, 0))
+	case "pgdown", " ", "ctrl+d":
+		e.cur = min(e.cur+max(e.tableRows, 1), max(len(vis)-1, 0))
+	case "pgup", "ctrl+u":
+		e.cur = max(e.cur-max(e.tableRows, 1), 0)
 	case "g":
 		e.cur = 0
 	case "G":
@@ -183,6 +187,7 @@ func (e *explorer) tablesView(width, height int) []string {
 		return append(out, "  "+sDim.Render("none"))
 	}
 	rows := max(height-len(out), 1)
+	e.tableRows = rows
 	if e.cur < e.offset {
 		e.offset = e.cur
 	}

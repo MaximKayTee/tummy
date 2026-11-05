@@ -64,6 +64,7 @@ type explorer struct {
 	cur, offset int
 	filter      textinput.Model
 	filtering   bool
+	tableRows   int // table list: rows per screen, set by view
 	wildcard    *config.ResolvedStream // tables matching it open with its where, select and steps
 
 	// what is being previewed
@@ -313,7 +314,7 @@ func (e *explorer) footer() (string, string) {
 		if e.filtering {
 			return helpLine("type", "filter", "enter", "done"), helpLine("esc", "done")
 		}
-		pairs = []string{"enter", "preview", "S", "sql", "/", "filter", "R", "refresh"}
+		pairs = []string{"enter", "preview", "S", "sql", "/", "filter", "pgup/pgdn", "page", "R", "refresh"}
 	case pageEndpoint:
 		pairs = append(e.endpoint.hints(), "ctrl+s", "fetch")
 	case pagePreview:
