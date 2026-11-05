@@ -1144,6 +1144,29 @@ func TestWizardEnterExploresDraftStream(t *testing.T) {
 	if w.step != stepStreams || len(w.draft.Streams) != 1 || w.draft.Streams[0].Name != "things" {
 		t.Fatalf("setup: step %d streams %+v", w.step, w.draft.Streams)
 	}
+	// ctrl+e on the picker previews the highlighted table and comes back to the picker
+	send(t, w, keyRunes("a"))
+	send(t, w, tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyCtrlE}) // past the * row
+	if w.explore == nil || w.explore.streamName != "things" || w.pick == nil {
+		t.Fatalf("ctrl+e: explore %v pick %v", w.explore, w.pick)
+	}
+	send(t, w, keyEsc)
+	if w.explore != nil || w.pick == nil {
+		t.Fatal("esc should return to the picker")
+	}
+	send(t, w, keyEsc)
+	// a source change lists tables again
+	w.step = stepBasics
+	before := w.srcTables
+	w.basics.set("source", "TGT")
+	w.applyBasics()
+	if w.srcTables != nil || before == nil {
+		t.Fatal("source change should drop the table list")
+	}
+	w.basics.set("source", "SRC")
+	w.applyBasics()
+	walk(t, w)
+	walk(t, w)
 	send(t, w, keyRunes("g"), keyEnter) // first stream: things
 	e := w.explore
 	if e == nil || e.bound != &w.draft || e.page != pagePreview || e.streamName != "things" {

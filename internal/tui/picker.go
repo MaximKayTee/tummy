@@ -340,7 +340,7 @@ func (p *picker) hints() []string {
 	case p.live && p.single:
 		return []string{"type", "filter", "enter", "pick"}
 	case p.live:
-		return []string{"type", "filter", "space", "tick", "ctrl+a/n", "all/none", "enter", "done"}
+		return []string{"type", "filter", "space", "tick", "ctrl+a/n", "all/none", "ctrl+e", "preview", "enter", "done"}
 	case p.typing && p.single:
 		return []string{"type", "filter", "enter", "pick"}
 	case p.typing:

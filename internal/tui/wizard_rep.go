@@ -68,7 +68,7 @@ type sampleMsg struct {
 // discoverTables lists every table of every schema of a connection.
 func discoverTables(c *config.Conn, role string) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if path := missingFile(c); path != "" { // opening would create it
 			if role == "target" {
@@ -336,6 +336,12 @@ func first(ss []string) string {
 // basicsInto copies the basics form into d.
 func (w *repWizard) basicsInto(d *config.ReplicationDraft) {
 	f := w.basics
+	if f.get("source") != d.Source {
+		w.srcTables, w.srcErr, w.colsSeen = nil, "", nil // listed again for the new source
+	}
+	if f.get("target") != d.Target {
+		w.tgtTables = nil
+	}
 	d.Name, d.Source, d.Target = f.get("name"), f.get("source"), f.get("target")
 	d.Defaults.Mode = f.get("mode")
 	d.Enabled = f.on("enabled")
@@ -601,6 +607,7 @@ func (w *repWizard) keyHelp() (string, [][2]string) {
 		rows = append(rows, [2]string{"type", "filter"}, [2]string{"new", "typed value"},
 			[2]string{"space", "tick"}, [2]string{"ctrl+a / ctrl+n", "tick all / none shown"},
 			[2]string{"schema.*", "every table of the schema, new ones too"},
+			[2]string{"ctrl+e", "the table's data; ctrl+s there adds it as shaped"},
 			[2]string{"enter", "add the ticked tables"}, [2]string{"esc", "cancel"})
 		return "tables", rows
 	case w.stream != nil:
@@ -790,6 +797,19 @@ func (w *repWizard) exploreSQL() tea.Cmd {
 	e.sqlInput.SetValue("")
 	w.explore, w.err = e, ""
 	return e.sqlInput.Focus()
+}
+
+// previewTable opens a source table from the picker in the explorer; ctrl+s there adds
+// it to the draft as shaped.
+func (w *repWizard) previewTable(table string) tea.Cmd {
+	e, err := newDraftStreamExplorer(w.opts, &w.draft, config.StreamDraft{Name: table, Stream: w.draft.Defaults})
+	if err != nil {
+		w.err = err.Error()
+		return nil
+	}
+	e.tables = w.srcTables
+	w.explore, w.err = e, ""
+	return e.start()
 }
 
 // exploreStream opens draft stream i in the explorer, bound to the draft.
@@ -1320,6 +1340,12 @@ func (w *repWizard) coveredBy() map[string]string {
 func (w *repWizard) keyPick(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	if msg.String() == "ctrl+s" {
 		msg = tea.KeyMsg{Type: tea.KeyEnter}
+	}
+	if msg.String() == "ctrl+e" && !w.isAPI() {
+		if item, ok := w.pick.current(); ok && !strings.ContainsAny(item, "*?[") {
+			return wizContinue, w.previewTable(item)
+		}
+		return wizContinue, nil
 	}
 	res, cmd := w.pick.update(msg)
 	switch res {
