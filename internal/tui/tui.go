@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"tummy/internal/txt"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -83,7 +84,8 @@ type Model struct {
 	runs       []state.Run
 	runsErr    error
 	run        state.Run
-	runFrom    view // where esc on a run goes
+	runFrom    view   // where esc on a run goes
+	planName   string // the run page shows a dry run of this replication
 	vp         viewport.Model
 
 	connResults map[string]connTestMsg
@@ -218,6 +220,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case forceQuitMsg:
 		return m, tea.Quit
 
+	case planMsg:
+		if msg.Err != nil {
+			return m, status(msg.Replication+": "+txt.FirstLine(msg.Err.Error()), true)
+		}
+		return m.openPlan(msg), nil
 	case runDoneMsg:
 		delete(m.inflight, msg.Replication)
 		delete(m.cancels, msg.Replication)
@@ -642,6 +649,8 @@ func (m Model) keyList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, keys.Run) && ok:
 		return m.startRun(cur, nil)
+	case key.Matches(msg, keys.Test) && ok:
+		return m, m.planNow(cur)
 	case key.Matches(msg, keys.Toggle) && ok:
 		return m, tea.Sequence(m.toggleEnabled(cur), m.loadSnapshot())
 	case key.Matches(msg, keys.Cancel) && ok:
@@ -696,6 +705,8 @@ func (m Model) keyDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.loadRuns(m.repName, m.streamName)
 	case key.Matches(msg, keys.Run):
 		return m.startRun(rep, nil)
+	case key.Matches(msg, keys.Test):
+		return m, m.planNow(rep)
 	case key.Matches(msg, keys.RunStream) && hasStream && stream != "*":
 		return m.startRun(rep, []string{stream})
 	case key.Matches(msg, keys.Toggle):
@@ -742,8 +753,19 @@ func (m Model) askCancel(rep replication) Model {
 }
 
 // openRun shows one run; esc goes back to the current view.
+// openPlan shows a dry run on the run page; r there runs it for real.
+func (m Model) openPlan(p planMsg) Model {
+	m.run, m.runFrom, m.planName = state.Run{Replication: p.Replication, Stream: "*"}, m.view, p.Replication
+	m.view = viewRun
+	m.vp.Width = max(m.width-4, 10)
+	m.vp.Height = max(m.bodyHeight()-2, 3)
+	m.vp.SetContent(planText(p.Rows, m.vp.Width))
+	m.vp.GotoTop()
+	return m
+}
+
 func (m Model) openRun(r state.Run) Model {
-	m.run, m.runFrom = r, m.view
+	m.run, m.runFrom, m.planName = r, m.view, ""
 	m.view = viewRun
 	m.vp.Width = max(m.width-4, 10)
 	m.vp.Height = max(m.bodyHeight()-2, 3)
@@ -869,6 +891,10 @@ func (m Model) back() Model {
 		}
 	case viewRun:
 		m.view = cmp.Or(m.runFrom, viewHistory)
+		if m.planName != "" {
+			m.view = m.runFrom // the list is the zero view
+		}
+		m.planName = ""
 	}
 	m.filter.SetValue("")
 	m.clampCursor()

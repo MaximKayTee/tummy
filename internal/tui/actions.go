@@ -31,6 +31,39 @@ type runDoneMsg struct {
 	Err         error
 }
 
+// planMsg is a dry run: what each stream would do, nothing written.
+type planMsg struct {
+	Replication string
+	Rows        []engine.PlanRow
+	Err         error
+}
+
+// planNow resolves the replication against its connections without writing.
+func (m Model) planNow(rep replication) tea.Cmd {
+	if rep.Err != "" {
+		return status(rep.Name+": "+txt.FirstLine(rep.Err), true)
+	}
+	if rep.ConnErr != "" {
+		return status(rep.Name+": "+rep.ConnErr, true)
+	}
+	opts := m.opts
+	return tea.Batch(status("dry run: "+rep.Name, false), func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		r, err := config.LoadReplication(rep.Path)
+		if err != nil {
+			return planMsg{Replication: rep.Name, Err: err}
+		}
+		conns, err := config.LoadConnections(opts.Connections)
+		if err != nil {
+			return planMsg{Replication: rep.Name, Err: err}
+		}
+		e := &engine.Engine{Conns: conns, State: opts.State, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		rows, err := e.Plan(ctx, r)
+		return planMsg{Replication: rep.Name, Rows: rows, Err: err}
+	})
+}
+
 type connTestMsg struct {
 	Name string
 	Err  error

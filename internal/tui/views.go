@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"tummy/internal/engine"
 	"tummy/internal/txt"
 
 	"github.com/charmbracelet/lipgloss"
@@ -96,7 +97,11 @@ func (m Model) header() []string {
 			crumbs += sDim.Render("  ·  ") + sText.Render(txt.Clean(m.streamName))
 		}
 	case viewRun:
-		crumb(fmt.Sprintf("run #%d", m.run.ID))
+		if m.planName != "" {
+			crumb("dry run " + txt.Clean(m.planName))
+		} else {
+			crumb(fmt.Sprintf("run #%d", m.run.ID))
+		}
 	case viewConns:
 		crumb("connections")
 	case viewWizard:
@@ -283,9 +288,9 @@ func joinFooter(left, right string, width int) string {
 func (m Model) shortHelp() string {
 	switch m.view {
 	case viewList:
-		return helpLine("enter", "open", "n", "new", "E", "edit", "r", "run", "e", "on/off", "d", "delete", "c", "connections", "H", "history", "/", "filter")
+		return helpLine("enter", "open", "n", "new", "E", "edit", "r", "run", "t", "dry run", "e", "on/off", "d", "delete", "c", "connections", "H", "history", "/", "filter")
 	case viewDetail:
-		pairs := []string{"E", "edit", "a", "add", "r", "run", "s", "run stream", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
+		pairs := []string{"E", "edit", "a", "add", "r", "run", "t", "dry run", "s", "run stream", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
 		if rep, ok := m.rep(m.repName); ok && rep.Running > 0 {
 			pairs = append(pairs, "x", "cancel run")
 		}
@@ -293,6 +298,9 @@ func (m Model) shortHelp() string {
 	case viewHistory:
 		return helpLine("enter", "details", "/", "filter")
 	case viewRun:
+		if m.planName != "" {
+			return helpLine("r", "run", "↑/↓ pgup/pgdn", "scroll")
+		}
 		return helpLine("r", "run again", "E", "edit", "↑/↓ pgup/pgdn", "scroll")
 	case viewConns:
 		pairs := []string{"enter", "explore", "n", "new", "E", "edit", "t", "test", "d", "delete", "/", "filter"}
@@ -360,7 +368,7 @@ func (m Model) helpPages() []helpPage {
 	case viewList:
 		section("replications", [][2]string{
 			{"enter", "streams of the replication"}, {"n", "new replication"}, {"E", "edit"}, {"e", "on/off for the daemon"},
-			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"x", "cancel a running run (y/n)"}, {"H", "run history"}, {"c", "connections"},
+			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"t", "dry run: target table, action and source query per stream, nothing written"}, {"x", "cancel a running run (y/n)"}, {"H", "run history"}, {"c", "connections"},
 		})
 	case viewDetail:
 		section("streams", [][2]string{
@@ -807,6 +815,36 @@ func (m Model) historyView() []string {
 }
 
 // ---------- run detail ----------
+
+// planText lays out a dry run: one block per stream.
+func planText(rows []engine.PlanRow, width int) string {
+	var b strings.Builder
+	for i, p := range rows {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		head := sText.Render(txt.Clean(p.Stream)) + sDim.Render("  →  ") + sText.Render(txt.Clean(p.Object)) + "   "
+		switch {
+		case p.Err != "":
+			head += sErr.Render(glyphErr + " " + txt.Clean(txt.FirstLine(p.Err)))
+		case p.Action == "skip":
+			head += sDim.Render("disabled")
+		default:
+			head += sWarn.Render(p.Action) + sDim.Render("  "+p.Mode)
+			if p.Watermark != nil {
+				head += sDim.Render(fmt.Sprintf("  from %v", p.Watermark))
+			}
+		}
+		b.WriteString(ansi.Truncate(head, width, "…") + "\n")
+		for _, l := range strings.Split(strings.TrimSpace(p.SQL), "\n") {
+			b.WriteString("    " + sDim.Render(ansi.Truncate(txt.Clean(l), max(width-4, 10), "…")) + "\n")
+		}
+	}
+	if len(rows) == 0 {
+		b.WriteString(sDim.Render("  no streams"))
+	}
+	return b.String()
+}
 
 func runText(r state.Run, width int) string {
 	var b strings.Builder

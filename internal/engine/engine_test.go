@@ -725,3 +725,37 @@ func TestReadOnlyTargetRefused(t *testing.T) {
 		t.Fatalf("read-only target accepted: %v", err)
 	}
 }
+
+func TestPlanDoesNotWrite(t *testing.T) {
+	f := setup(t)
+	r := f.replication("source = \"SRC\"\ntarget = \"TGT\"\nmode = \"incremental\"\nprimary_key = [\"id\"]\nupdate_key = \"updated_at\"\n[streams.orders]\n[streams.customers]\nmode = \"full-refresh\"\n[streams.tmp_scratch]\ndisabled = true\n")
+	e := f.engine()
+	rows, err := e.Plan(context.Background(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]PlanRow{}
+	for _, p := range rows {
+		by[p.Stream] = p
+	}
+	if p := by["orders"]; p.Action != "create" || p.Exists || !strings.Contains(p.SQL, "orders") || p.Err != "" {
+		t.Fatalf("orders before any run: %+v", p)
+	}
+	if p := by["tmp_scratch"]; p.Action != "skip" || !p.Disabled {
+		t.Fatalf("disabled: %+v", p)
+	}
+	if n := f.count("select count(*) from sqlite_master where name = 'orders'"); n != 0 {
+		t.Fatal("plan created the target table")
+	}
+	f.run(e, r, "orders")
+	rows, _ = e.Plan(context.Background(), r)
+	for _, p := range rows {
+		by[p.Stream] = p
+	}
+	if p := by["orders"]; p.Action != "upsert" || !p.Exists || p.Watermark == nil || !strings.Contains(p.SQL, "updated_at") {
+		t.Fatalf("orders after a run: %+v", p)
+	}
+	if p := by["customers"]; p.Action != "create" {
+		t.Fatalf("customers: %+v", p)
+	}
+}

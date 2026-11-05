@@ -360,3 +360,33 @@ func TestBadConnListedWithError(t *testing.T) {
 		t.Fatalf("view:\n%s", v)
 	}
 }
+
+func TestDryRunPage(t *testing.T) {
+	m := loaded(t, testHome(t))
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = mm.(Model)
+	var plan planMsg
+	found := false
+	for _, msg := range runBatch(t, cmd) {
+		if p, ok := msg.(planMsg); ok {
+			plan, found = p, true
+		}
+	}
+	if !found {
+		t.Fatal("t on the list should plan the replication")
+	}
+	mm, _ = m.Update(plan)
+	m = mm.(Model)
+	v := m.View()
+	if m.view != viewRun || m.planName == "" || !strings.Contains(v, "dry run") || !strings.Contains(v, "create") || !strings.Contains(v, "things") {
+		t.Fatalf("plan page:\n%s", v)
+	}
+	if runs, _ := m.opts.State.RunsFor(context.Background(), "", "", 10); len(runs) != 0 {
+		t.Fatal("dry run wrote a run")
+	}
+	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = mm.(Model)
+	if m.view != viewList || m.planName != "" {
+		t.Fatalf("esc: view %d plan %q", m.view, m.planName)
+	}
+}
