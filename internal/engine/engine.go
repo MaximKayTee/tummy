@@ -224,6 +224,7 @@ func (e *Engine) run(ctx context.Context, r *config.Replication, only []string) 
 
 	var results []Result
 	var failed int
+	var loaded []db.Table
 	for _, s := range streams {
 		if !selected(s) {
 			continue
@@ -242,8 +243,10 @@ func (e *Engine) run(ctx context.Context, r *config.Replication, only []string) 
 			e.log().Error("stream failed", "stream", s.Name, "err", res.Err)
 		} else {
 			e.log().Info("stream done", "stream", s.Name, "object", res.Object, "rows", res.Rows, "took", res.Took.Round(time.Millisecond))
+			loaded = append(loaded, targetTable(tgt, s))
 		}
 	}
+	e.recordTargetStats(ctx, tgt, r.Target, loaded)
 	if failed > 0 {
 		for _, res := range results {
 			if res.Err != nil {
@@ -252,6 +255,55 @@ func (e *Engine) run(ctx context.Context, r *config.Replication, only []string) 
 		}
 	}
 	return results, nil
+}
+
+// recordTargetStats stores the rows and size of the tables a run loaded, from the
+// target's catalog in one query. Stored under the table name the run used.
+func (e *Engine) recordTargetStats(ctx context.Context, tgt *db.DB, conn string, tables []db.Table) {
+	if len(tables) == 0 || e.State == nil {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	stats, err := targetStats(ctx, tgt, tables)
+	if err == nil {
+		err = e.State.SaveTableStats(ctx, conn, time.Now(), false, stats)
+	}
+	if err != nil {
+		e.log().Warn("target stats not recorded", "conn", conn, "err", err)
+	}
+}
+
+// targetStats is the catalog reading of tables. A table with no schema in its name
+// matches the catalog's by name alone. sqlite is counted instead.
+func targetStats(ctx context.Context, tgt *db.DB, tables []db.Table) ([]state.TableStat, error) {
+	var out []state.TableStat
+	if tgt.Dialect.TableStats() == "" {
+		for _, t := range tables {
+			n, err := tgt.CountTable(ctx, t)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, state.TableStat{Schema: t.Schema, Table: t.Name, Rows: n, Bytes: -1, Exact: true})
+		}
+		return out, nil
+	}
+	all, err := tgt.TableStats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tables {
+		i := slices.IndexFunc(all, func(s db.TableStat) bool { return s.Table == t })
+		if i < 0 && t.Schema == "" {
+			i = slices.IndexFunc(all, func(s db.TableStat) bool { return s.Table.Name == t.Name })
+		}
+		if i < 0 {
+			continue
+		}
+		out = append(out, state.TableStat{Schema: t.Schema, Table: t.Name, Rows: all[i].Rows, Bytes: all[i].Bytes, Exact: all[i].Exact})
+	}
+	return out, nil
 }
 
 // wanted is the set of names in only; nil for all. Unknown names are an error.

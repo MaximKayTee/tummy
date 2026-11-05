@@ -472,7 +472,7 @@ func (m Model) listView() []string {
 		tgtW = max(tgtW, lipgloss.Width(txt.Clean(r.Target)))
 	}
 	cols := []column{{Title: "REPLICATION"}, {Title: "SOURCE", Width: min(srcW, 18)}, {Title: "TARGET", Width: min(tgtW, 18)}, {Title: "STREAMS", Width: 7, Right: true},
-		{Title: "SCHEDULE", Width: 13}, {Title: "LAST RUN"}, {Title: "NEXT", Width: 11}}
+		{Title: "SIZE", Width: 9, Right: true}, {Title: "SCHEDULE", Width: 13}, {Title: "LAST RUN"}, {Title: "NEXT", Width: 11}}
 	if !wide {
 		cols = []column{{Title: "REPLICATION"}, {Title: "STREAMS", Width: 7, Right: true}, {Title: "LAST RUN"}, {Title: "NEXT", Width: 9}}
 	}
@@ -491,7 +491,7 @@ func (m Model) listView() []string {
 		}
 		row = append(row, strconv.Itoa(len(r.Streams)))
 		if wide {
-			row = append(row, txt.Clean(orDash(r.Schedule)))
+			row = append(row, sDim.Render(sizeText(r.Bytes)), txt.Clean(orDash(r.Schedule)))
 		}
 		row = append(row, m.lastRunCell(r), m.nextCell(r))
 		rows = append(rows, row)
@@ -571,7 +571,7 @@ func (m Model) detailView() []string {
 
 	wide := m.width >= 100
 	cols := []column{{Title: "STREAM"}, {Title: "OBJECT"}, {Title: "MODE", Width: 12},
-		{Title: "LAST RUN", Width: 11}, {Title: "TIME", Width: 7, Right: true}, {Title: "ROWS", Width: 9, Right: true}, {Title: "STATUS"}}
+		{Title: "LAST RUN", Width: 11}, {Title: "TIME", Width: 7, Right: true}, {Title: "ROWS", Width: 9, Right: true}, {Title: "SIZE", Width: 9, Right: true}, {Title: "STATUS"}}
 	if !wide {
 		cols = []column{{Title: "STREAM"}, {Title: "MODE", Width: 12}, {Title: "LAST RUN", Width: 10}, {Title: "ROWS", Width: 8, Right: true}, {Title: "STATUS"}}
 	}
@@ -612,7 +612,11 @@ func (m Model) detailView() []string {
 		row = append(row, txt.Clean(mode))
 		switch {
 		case ran && wide:
-			row = append(row, ago(run.Started), txt.Dur(run.Duration()), txt.Thousands(run.Rows), m.statusCell(run))
+			size := "—"
+			if ts, ok := tableStat(m.snap.Tables, rep.Target, run.Object); ok {
+				size = sizeText(ts.Bytes)
+			}
+			row = append(row, ago(run.Started), txt.Dur(run.Duration()), txt.Thousands(run.Rows), sDim.Render(size), m.statusCell(run))
 		case ran:
 			row = append(row, ago(run.Started), txt.Thousands(run.Rows), m.statusCell(run))
 		default:

@@ -16,6 +16,35 @@ type TableStat struct {
 	PrevRows int64
 }
 
+// AllTableStats is the latest reading of every table, keyed by TableKey.
+func (s *Store) AllTableStats(ctx context.Context) (map[string]TableStat, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT conn, schema_name, table_name, rows, bytes, exact, refreshed FROM (
+  SELECT *, ROW_NUMBER() OVER (PARTITION BY conn, schema_name, table_name ORDER BY refreshed DESC, id DESC) AS rn FROM table_stats
+) WHERE rn = 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]TableStat{}
+	for rows.Next() {
+		var t TableStat
+		var conn, at string
+		var n, b sql.NullInt64
+		if err := rows.Scan(&conn, &t.Schema, &t.Table, &n, &b, &t.Exact, &at); err != nil {
+			return nil, err
+		}
+		t.Rows, t.Bytes, t.PrevRows = orUnknown(n), orUnknown(b), -1
+		if t.Refreshed, err = parseTS(at); err != nil {
+			return nil, err
+		}
+		out[TableKey(conn, t.Schema, t.Table)] = t
+	}
+	return out, rows.Err()
+}
+
+// TableKey is the AllTableStats key of a table.
+func TableKey(conn, schema, table string) string { return conn + "\x00" + schema + "\x00" + table }
+
 // ConnStats sums the latest full refresh of a connection.
 type ConnStats struct {
 	Tables    int

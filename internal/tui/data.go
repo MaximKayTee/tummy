@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"tummy/internal/config"
+	"tummy/internal/db"
 	"tummy/internal/state"
 )
 
@@ -39,6 +40,7 @@ type replication struct {
 	Stopped int // cancelled
 	OK      int
 	Rows    int64 // rows of the newest run set
+	Bytes   int64 // target tables of the newest run set, -1 when none is known
 	LastAt  time.Time
 	Next    *time.Time
 	Pending int
@@ -60,11 +62,22 @@ type snapshot struct {
 	Reps      []replication
 	Conns     []connRow
 	ConnStats map[string]state.ConnStats // latest stats refresh per connection
+	Tables    map[string]state.TableStat // latest reading per table, by state.TableKey
 	Daemon    *state.Daemon
 	Err       error
 }
 
 type snapshotMsg snapshot
+
+// tableStat is the stored reading of a run's target table, named as the run wrote it.
+func tableStat(tables map[string]state.TableStat, conn, object string) (state.TableStat, bool) {
+	if object == "" {
+		return state.TableStat{}, false
+	}
+	t := db.ParseTable(object)
+	ts, ok := tables[state.TableKey(conn, t.Schema, t.Name)]
+	return ts, ok
+}
 
 // fileCache keeps parsed files between refreshes. A file is parsed again when its
 // modification time or size changes.
@@ -167,6 +180,9 @@ func (m Model) loadSnapshot() tea.Cmd {
 		if snap.ConnStats, err = st.ConnStats(ctx); err != nil {
 			snap.Err = err
 		}
+		if snap.Tables, err = st.AllTableStats(ctx); err != nil {
+			snap.Err = err
+		}
 		snap.Daemon, err = st.DaemonStatus(ctx)
 		if err != nil {
 			snap.Err = err
@@ -175,7 +191,7 @@ func (m Model) loadSnapshot() tea.Cmd {
 
 		for i, c := range cache.replications(files) {
 			f := files[i]
-			rep := replication{Path: f, Last: map[string]state.Run{}}
+			rep := replication{Path: f, Last: map[string]state.Run{}, Bytes: -1}
 			if c.err != nil {
 				rep.Name = config.NameOf(f)
 				rep.Err = strings.TrimPrefix(c.err.Error(), f+": ")
@@ -215,6 +231,9 @@ func (m Model) loadSnapshot() tea.Cmd {
 					rep.OK++
 				}
 				rep.Rows += run.Rows
+				if ts, ok := tableStat(snap.Tables, rep.Target, run.Object); ok && ts.Bytes >= 0 {
+					rep.Bytes = max(rep.Bytes, 0) + ts.Bytes
+				}
 				if run.Started.After(rep.LastAt) {
 					rep.LastAt = run.Started
 				}

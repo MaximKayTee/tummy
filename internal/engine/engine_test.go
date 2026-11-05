@@ -139,6 +139,17 @@ object = "orders_copy"
 	if f.count("SELECT count(*) FROM orders_copy") != 2 {
 		t.Fatal("full refresh did not replace")
 	}
+	// each run records the target tables' readings
+	stats, err := f.st.AllTableStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts := stats[state.TableKey("TGT", "", "orders_copy")]; ts.Rows != 2 || !ts.Exact {
+		t.Fatalf("orders_copy reading: %+v (%d stored)", ts, len(stats))
+	}
+	if ts := stats[state.TableKey("TGT", "", "customers")]; ts.Rows != 2 {
+		t.Fatalf("customers reading: %+v", ts)
+	}
 }
 
 func TestIncrementalUpsert(t *testing.T) {
