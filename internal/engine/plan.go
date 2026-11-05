@@ -40,7 +40,7 @@ func (e *Engine) Plan(ctx context.Context, r *config.Replication) ([]PlanRow, er
 	tp.Create = true // a sqlite target the run would create: an empty file, as the run makes
 	tgt, err := db.Open(ctx, tp)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("target: %w", err)
 	}
 	defer tgt.Close()
 	var streams []stream
@@ -55,17 +55,17 @@ func (e *Engine) Plan(ctx context.Context, r *config.Replication) ([]PlanRow, er
 		}
 	} else {
 		if src, err = db.Open(ctx, srcConn.DB()); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("source: %w", err)
 		}
 		defer src.Close()
 		if streams, err = e.expand(ctx, src, tgt, r); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("source tables: %w", err)
 		}
 	}
 	// the target's tables once, not one lookup per stream: a wildcard can be thousands
 	listed, err := tgt.ListAllTables(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("target tables: %w", err)
 	}
 	have := map[string]bool{}
 	for _, t := range listed {
@@ -84,7 +84,7 @@ func (e *Engine) Plan(ctx context.Context, r *config.Replication) ([]PlanRow, er
 		if target.Schema != "" || !tgt.Dialect.HasSchemas() {
 			exists = have[target.String()]
 		} else if exists, err = tgt.TableExists(ctx, target); err != nil { // default schema: the engine knows it
-			row.Err = err.Error()
+			row.Err = "target exists: " + err.Error()
 			out = append(out, row)
 			continue
 		}
@@ -97,13 +97,13 @@ func (e *Engine) Plan(ctx context.Context, r *config.Replication) ([]PlanRow, er
 		}
 		wm, err := watermark(ctx, tgt, s, target, exists)
 		if err != nil {
-			row.Err = err.Error()
+			row.Err = "target " + err.Error()
 			out = append(out, row)
 			continue
 		}
 		row.Watermark = wm
 		if sql, _, err := RunQuery(ctx, src, s.ResolvedStream, wm); err != nil {
-			row.Err = err.Error()
+			row.Err = "source query: " + err.Error()
 		} else {
 			row.SQL = sql
 		}
