@@ -58,7 +58,7 @@ k n; expect "n without connections opens the connection form" "no connections"
 k Escape; k c; expect "connections empty" "^ +none *$"
 
 echo "== create sqlite connection SHOP"
-k n; typ "SHOP"; k Tab; k Right; k Right; k Right; k Tab; typ "$ROOT/data/shop.db"; k C-t; expect "probe connected" "connected"
+k n; typ "SHOP"; k Tab; k Right; k Right; k Right; k Tab; typ "$ROOT/data/shop.db"; k C-g; expect "probe connected" "connected"
 expect "probe lists tables" "customers"
 k C-s; expect "SHOP saved" "SHOP +sqlite"
 check "connections.toml created at default path" test -f "$CFG/connections.toml"
@@ -69,7 +69,7 @@ k n; typ "LOCAL"; k Tab; k Right; k Right; k Right; k Tab; typ "local.db"; k C-s
 
 if [ $online = 1 ]; then
   echo "== create API connection"
-  k n; typ "PLACEHOLDER"; k Tab; k Right; k Right; k Right; k Right; k Tab; typ "https://jsonplaceholder.typicode.com"; k Tab; k Tab; typ "300/m"; k C-t; expect "api probe" "connected" 10
+  k n; typ "PLACEHOLDER"; k Tab; k Right; k Right; k Right; k Right; k Tab; typ "https://jsonplaceholder.typicode.com"; k Tab; k Tab; typ "300/m"; k C-g; expect "api probe" "connected" 10
   k C-s; expect "API saved" "PLACEHOLDER +api"
   "$BIN" conns test PLACEHOLDER | grep -q '^ok  HTTP' && pass "conns test on an API" || fail "conns test on an API"
 else
