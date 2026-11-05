@@ -21,6 +21,9 @@ type Dialect interface {
 	MaxRows() int
 	// RejectsNUL: text values with a NUL byte cannot be stored; the inserter drops the byte.
 	RejectsNUL() bool
+	// BinaryUDTs maps the column types the driver returns in the engine's own binary
+	// serialisation to a SELECT expression (%s = the column) that returns them as text.
+	BinaryUDTs() map[string]string
 	HasSchemas() bool
 	KindOf(typeName string) Kind
 	// TypeName is the column type for CREATE TABLE and ALTER TABLE ADD. Keys get index-sized types.
@@ -126,14 +129,15 @@ func swapTx(dl Dialect, tmp, target Table, exists bool) ([]string, bool) {
 
 type postgres struct{}
 
-func (postgres) Name() string             { return "postgres" }
-func (postgres) Quote(s string) string    { return quoteDouble(s) }
-func (postgres) Placeholder(i int) string { return "$" + strconv.Itoa(i) }
-func (postgres) MaxParams() int           { return 65000 }
-func (postgres) RejectsNUL() bool         { return true }
-func (postgres) MaxRows() int             { return 5000 }
-func (postgres) HasSchemas() bool         { return true }
-func (postgres) KindOf(n string) Kind     { return kindFromTypeName(n) }
+func (postgres) Name() string                  { return "postgres" }
+func (postgres) Quote(s string) string         { return quoteDouble(s) }
+func (postgres) Placeholder(i int) string      { return "$" + strconv.Itoa(i) }
+func (postgres) MaxParams() int                { return 65000 }
+func (postgres) RejectsNUL() bool              { return true }
+func (postgres) BinaryUDTs() map[string]string { return nil }
+func (postgres) MaxRows() int                  { return 5000 }
+func (postgres) HasSchemas() bool              { return true }
+func (postgres) KindOf(n string) Kind          { return kindFromTypeName(n) }
 func (postgres) TypeName(c Column, _ bool) string {
 	switch c.Kind {
 	case Int:
@@ -196,14 +200,15 @@ func (postgres) maxOpenConns() int                            { return 0 }
 
 type mysql struct{}
 
-func (mysql) Name() string           { return "mysql" }
-func (mysql) Quote(s string) string  { return "`" + strings.ReplaceAll(s, "`", "``") + "`" }
-func (mysql) Placeholder(int) string { return "?" }
-func (mysql) MaxParams() int         { return 60000 }
-func (mysql) RejectsNUL() bool       { return false }
-func (mysql) MaxRows() int           { return 1000 } // max_allowed_packet
-func (mysql) HasSchemas() bool       { return true }
-func (mysql) KindOf(n string) Kind   { return kindFromTypeName(n) }
+func (mysql) Name() string                  { return "mysql" }
+func (mysql) Quote(s string) string         { return "`" + strings.ReplaceAll(s, "`", "``") + "`" }
+func (mysql) Placeholder(int) string        { return "?" }
+func (mysql) MaxParams() int                { return 60000 }
+func (mysql) RejectsNUL() bool              { return false }
+func (mysql) BinaryUDTs() map[string]string { return nil }
+func (mysql) MaxRows() int                  { return 1000 } // max_allowed_packet
+func (mysql) HasSchemas() bool              { return true }
+func (mysql) KindOf(n string) Kind          { return kindFromTypeName(n) }
 func (mysql) TypeName(c Column, isKey bool) string {
 	switch c.Kind {
 	case Int:
@@ -314,8 +319,14 @@ func (mssql) Quote(s string) string    { return "[" + strings.ReplaceAll(s, "]",
 func (mssql) Placeholder(i int) string { return "@p" + strconv.Itoa(i) }
 func (mssql) MaxParams() int           { return 2000 }
 func (mssql) RejectsNUL() bool         { return false }
-func (mssql) MaxRows() int             { return 1000 }
-func (mssql) HasSchemas() bool         { return true }
+
+// CLR types arrive as SQL Server's serialisation. ToString gives WKT with Z and M for
+// spatial and the /1/2/ path for hierarchyid; NULL stays NULL.
+var mssqlUDTs = map[string]string{"GEOGRAPHY": "%s.ToString()", "GEOMETRY": "%s.ToString()", "HIERARCHYID": "%s.ToString()"}
+
+func (mssql) BinaryUDTs() map[string]string { return mssqlUDTs }
+func (mssql) MaxRows() int                  { return 1000 }
+func (mssql) HasSchemas() bool              { return true }
 func (mssql) KindOf(n string) Kind {
 	switch strings.ToUpper(n) {
 	case "TIMESTAMP", "ROWVERSION": // binary(8), not a time
@@ -409,14 +420,15 @@ func (mssql) maxOpenConns() int                       { return 0 }
 
 type sqlite struct{}
 
-func (sqlite) Name() string           { return "sqlite" }
-func (sqlite) Quote(s string) string  { return quoteDouble(s) }
-func (sqlite) Placeholder(int) string { return "?" }
-func (sqlite) MaxParams() int         { return 30000 }
-func (sqlite) RejectsNUL() bool       { return false }
-func (sqlite) MaxRows() int           { return 2000 }
-func (sqlite) HasSchemas() bool       { return false }
-func (sqlite) KindOf(n string) Kind   { return kindFromTypeName(n) }
+func (sqlite) Name() string                  { return "sqlite" }
+func (sqlite) Quote(s string) string         { return quoteDouble(s) }
+func (sqlite) Placeholder(int) string        { return "?" }
+func (sqlite) MaxParams() int                { return 30000 }
+func (sqlite) RejectsNUL() bool              { return false }
+func (sqlite) BinaryUDTs() map[string]string { return nil }
+func (sqlite) MaxRows() int                  { return 2000 }
+func (sqlite) HasSchemas() bool              { return false }
+func (sqlite) KindOf(n string) Kind          { return kindFromTypeName(n) }
 
 // TypeName uses declared types the driver reads back as the same kind:
 // TIMESTAMP and DATE text comes back as time.Time.

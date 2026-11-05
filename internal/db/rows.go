@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -159,11 +161,34 @@ func (ins *Inserter) rowByRow(ctx context.Context) error {
 		if _, err := d.ExecContext(ctx, one, ins.buf[r*n:(r+1)*n]...); err != nil {
 			where := fmt.Sprintf("row %d", ins.Total+int64(r)+1)
 			var pe *pgconn.PgError
-			if errors.As(err, &pe) && pe.ColumnName != "" {
-				where += ", column " + pe.ColumnName
+			if errors.As(err, &pe) {
+				if pe.ColumnName != "" {
+					where += ", column " + pe.ColumnName
+				} else if c, ok := ins.paramColumn(pe.Where); ok {
+					where += ", column " + c.Name
+					if c.Type != "" {
+						where += " (source type " + c.Type + ")"
+					}
+				}
 			}
 			return fmt.Errorf("%s: insert into %s: %s: %w", d.Name, ins.Label, where, err)
 		}
 	}
 	return nil
+}
+
+var bindParam = regexp.MustCompile(`parameter \$(\d+)`)
+
+// paramColumn maps Postgres's "unnamed portal parameter $N" context, set on errors
+// converting a bound value such as bad UTF-8, to the column of a one-row insert.
+func (ins *Inserter) paramColumn(where string) (Column, bool) {
+	m := bindParam.FindStringSubmatch(where)
+	if m == nil {
+		return Column{}, false
+	}
+	i, err := strconv.Atoi(m[1])
+	if err != nil || i < 1 || i > len(ins.cols) {
+		return Column{}, false
+	}
+	return ins.cols[i-1], true
 }

@@ -138,7 +138,11 @@ func RunQuery(ctx context.Context, src *db.DB, s config.ResolvedStream, wm any) 
 	case strings.Contains(s.Name, "*"):
 		return "", nil, fmt.Errorf("stream %s: a table pattern has no single query", s.Name)
 	}
-	return sourceQuery(ctx, src, plain(s), wm)
+	q, args, err := sourceQuery(ctx, src, plain(s), wm)
+	if err != nil {
+		return "", nil, err
+	}
+	return textUDTs(ctx, src, q, args), args, nil
 }
 
 // watermark is MAX(update_key) of an existing incremental target, or nil.
@@ -265,6 +269,34 @@ func sourceQuery(ctx context.Context, src *db.DB, s stream, wm any) (string, []a
 	return q, args, nil
 }
 
+// textUDTs wraps q so columns of the source's BinaryUDTs arrive as text. q is returned
+// as is when it has none, or when the probe fails: the query then reports its own error.
+func textUDTs(ctx context.Context, src *db.DB, q string, args []any) string {
+	udts := src.Dialect.BinaryUDTs()
+	if len(udts) == 0 {
+		return q
+	}
+	rd, err := src.Query(ctx, db.Wrap(src.Dialect, q, "*", "_c")+" WHERE 1=0", args...)
+	if err != nil {
+		return q
+	}
+	rd.Close()
+	sel := make([]string, len(rd.Columns))
+	found := false
+	for i, c := range rd.Columns {
+		name := src.Dialect.Quote(c.Name)
+		sel[i] = "_u." + name
+		if f, ok := udts[c.Type]; ok {
+			sel[i] = fmt.Sprintf(f, sel[i]) + " AS " + name
+			found = true
+		}
+	}
+	if !found {
+		return q
+	}
+	return db.Wrap(src.Dialect, q, strings.Join(sel, ", "), "_u")
+}
+
 // openDB runs the source query for a database stream. timeout bounds the wait for the first row.
 func (e *Engine) openDB(ctx context.Context, src, tgt *db.DB, s stream, target db.Table, exists bool, timeout time.Duration) (*rowSource, error) {
 	wm, err := watermark(ctx, tgt, s, target, exists)
@@ -275,6 +307,7 @@ func (e *Engine) openDB(ctx context.Context, src, tgt *db.DB, s stream, target d
 	if err != nil {
 		return nil, err
 	}
+	query = textUDTs(ctx, src, query, args)
 	e.log().Debug("source query", "stream", s.Name, "sql", query, "args", args)
 
 	qctx, cancel := context.WithCancelCause(ctx)

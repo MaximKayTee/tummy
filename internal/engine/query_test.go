@@ -107,3 +107,50 @@ func TestFormatWatermark(t *testing.T) {
 		}
 	}
 }
+
+// udtDialect gives sqlite a binary-serialised column type, the way SQL Server sends geography.
+type udtDialect struct{ db.Dialect }
+
+func (udtDialect) BinaryUDTs() map[string]string { return map[string]string{"GEOGRAPHY": "upper(%s)"} }
+
+func TestTextUDTs(t *testing.T) {
+	ctx := context.Background()
+	src, err := db.Open(ctx, db.Params{Name: "S", Type: "sqlite", Path: filepath.Join(t.TempDir(), "s.db"), Create: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	src.Dialect = udtDialect{src.Dialect}
+	if err := src.Exec(ctx, "CREATE TABLE sites (id INTEGER, shape GEOGRAPHY, name TEXT); INSERT INTO sites VALUES (1, 'point (1 2)', 'a'), (2, NULL, 'b')"); err != nil {
+		t.Fatal(err)
+	}
+	q := textUDTs(ctx, src, `SELECT * FROM "sites" WHERE "id" >= ?`, []any{1})
+	if want := `SELECT _u."id", upper(_u."shape") AS "shape", _u."name" FROM (SELECT * FROM "sites" WHERE "id" >= ?) AS _u`; q != want {
+		t.Fatalf("got  %s\nwant %s", q, want)
+	}
+	rd, err := src.Query(ctx, q, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rd.Close()
+	var got []string
+	for {
+		row, err := rd.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row == nil {
+			break
+		}
+		got = append(got, fmt.Sprint(row))
+	}
+	if strings.Join(got, ";") != "[1 POINT (1 2) a];[2 <nil> b]" || rd.Columns[1].Name != "shape" {
+		t.Fatalf("rows %q cols %v", got, rd.Columns)
+	}
+	if q := textUDTs(ctx, src, `SELECT "id", "name" FROM "sites"`, nil); q != `SELECT "id", "name" FROM "sites"` {
+		t.Fatalf("no udt column, query changed: %s", q)
+	}
+	if q := textUDTs(ctx, src, `SELECT nope FROM "sites"`, nil); q != `SELECT nope FROM "sites"` {
+		t.Fatalf("failed probe, query changed: %s", q)
+	}
+}
