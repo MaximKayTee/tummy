@@ -19,6 +19,8 @@ type Dialect interface {
 	Placeholder(i int) string
 	MaxParams() int
 	MaxRows() int
+	// RejectsNUL: text values with a NUL byte cannot be stored; the inserter drops the byte.
+	RejectsNUL() bool
 	HasSchemas() bool
 	KindOf(typeName string) Kind
 	// TypeName is the column type for CREATE TABLE and ALTER TABLE ADD. Keys get index-sized types.
@@ -128,6 +130,7 @@ func (postgres) Name() string             { return "postgres" }
 func (postgres) Quote(s string) string    { return quoteDouble(s) }
 func (postgres) Placeholder(i int) string { return "$" + strconv.Itoa(i) }
 func (postgres) MaxParams() int           { return 65000 }
+func (postgres) RejectsNUL() bool         { return true }
 func (postgres) MaxRows() int             { return 5000 }
 func (postgres) HasSchemas() bool         { return true }
 func (postgres) KindOf(n string) Kind     { return kindFromTypeName(n) }
@@ -197,6 +200,7 @@ func (mysql) Name() string           { return "mysql" }
 func (mysql) Quote(s string) string  { return "`" + strings.ReplaceAll(s, "`", "``") + "`" }
 func (mysql) Placeholder(int) string { return "?" }
 func (mysql) MaxParams() int         { return 60000 }
+func (mysql) RejectsNUL() bool       { return false }
 func (mysql) MaxRows() int           { return 1000 } // max_allowed_packet
 func (mysql) HasSchemas() bool       { return true }
 func (mysql) KindOf(n string) Kind   { return kindFromTypeName(n) }
@@ -309,6 +313,7 @@ func (mssql) Name() string             { return "mssql" }
 func (mssql) Quote(s string) string    { return "[" + strings.ReplaceAll(s, "]", "]]") + "]" }
 func (mssql) Placeholder(i int) string { return "@p" + strconv.Itoa(i) }
 func (mssql) MaxParams() int           { return 2000 }
+func (mssql) RejectsNUL() bool         { return false }
 func (mssql) MaxRows() int             { return 1000 }
 func (mssql) HasSchemas() bool         { return true }
 func (mssql) KindOf(n string) Kind {
@@ -408,6 +413,7 @@ func (sqlite) Name() string           { return "sqlite" }
 func (sqlite) Quote(s string) string  { return quoteDouble(s) }
 func (sqlite) Placeholder(int) string { return "?" }
 func (sqlite) MaxParams() int         { return 30000 }
+func (sqlite) RejectsNUL() bool       { return false }
 func (sqlite) MaxRows() int           { return 2000 }
 func (sqlite) HasSchemas() bool       { return false }
 func (sqlite) KindOf(n string) Kind   { return kindFromTypeName(n) }

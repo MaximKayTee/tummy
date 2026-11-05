@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -101,15 +102,26 @@ type Inserter struct {
 	buf     []any
 	rows    int
 	Total   int64
+	strip   bool
+	// Stripped counts the values a NUL byte was removed from (RejectsNUL targets).
+	Stripped int64
 }
 
 func (d *DB) NewInserter(t Table, cols []Column) *Inserter {
 	per := d.Dialect.MaxParams() / max(len(cols), 1)
 	per = min(per, d.Dialect.MaxRows())
-	return &Inserter{Label: t.String(), db: d, table: t, cols: cols, perStmt: max(per, 1)}
+	return &Inserter{Label: t.String(), db: d, table: t, cols: cols, perStmt: max(per, 1), strip: d.Dialect.RejectsNUL()}
 }
 
 func (ins *Inserter) Add(ctx context.Context, row []any) error {
+	if ins.strip {
+		for i, v := range row {
+			if str, ok := v.(string); ok && strings.IndexByte(str, 0) >= 0 {
+				row[i] = strings.ReplaceAll(str, "\x00", "")
+				ins.Stripped++
+			}
+		}
+	}
 	ins.buf = append(ins.buf, row...)
 	ins.rows++
 	if ins.rows >= ins.perStmt {

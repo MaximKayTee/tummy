@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -131,3 +132,35 @@ func TestDerivedMSSQL(t *testing.T) {
 		}
 	}
 }
+
+func TestInserterStripsNULForRejectingTargets(t *testing.T) {
+	ctx := context.Background()
+	d, err := Open(ctx, Params{Name: "L", Type: "sqlite", Path: filepath.Join(t.TempDir(), "x.db"), Create: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	d.Dialect = nulRejecting{d.Dialect}
+	if err := d.Exec(ctx, "CREATE TABLE t (id INTEGER, v TEXT)"); err != nil {
+		t.Fatal(err)
+	}
+	ins := d.NewInserter(Table{Name: "t"}, []Column{{Name: "id", Kind: Int}, {Name: "v", Kind: String}})
+	if err := ins.Add(ctx, []any{1, "a\x00b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ins.Add(ctx, []any{2, "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ins.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var v string
+	if err := d.QueryRowContext(ctx, "SELECT v FROM t WHERE id = 1").Scan(&v); err != nil || v != "ab" || ins.Stripped != 1 {
+		t.Fatalf("v=%q stripped=%d err=%v", v, ins.Stripped, err)
+	}
+}
+
+// nulRejecting makes a dialect behave like postgres for NUL bytes.
+type nulRejecting struct{ Dialect }
+
+func (nulRejecting) RejectsNUL() bool { return true }

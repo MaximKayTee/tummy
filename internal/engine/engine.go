@@ -467,6 +467,9 @@ func (e *Engine) runStream(ctx context.Context, r *config.Replication, tgt *db.D
 			e.phase(ctx, runID, s, res.Object, PhaseLoading, ins.Total)
 		}
 	}
+	if ins.Stripped > 0 {
+		e.log().Warn("NUL bytes removed from text values: the target cannot store them", "stream", s.Name, "values", ins.Stripped)
+	}
 	if err := ins.Flush(ctx); err != nil {
 		res.Err = err
 		return
