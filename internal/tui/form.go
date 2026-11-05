@@ -48,6 +48,7 @@ type field struct {
 	Masked   bool                   // text: shown with passwords masked unless focused
 	Invert   bool                   // toggle: On is shown as off, so a "disabled" key reads as Enabled
 	Required bool
+	ReqFn    func(f *form) bool // required when true; Required wins
 	Validate func(string) error
 	Show     func(f *form) bool // nil means always
 
@@ -91,8 +92,9 @@ func toggle(key, label, help string, on bool) *field {
 	return &field{Key: key, Label: label, Help: help, Kind: kindToggle, On: on}
 }
 
-func (f *field) required() *field    { f.Required = true; return f }
-func (f *field) def(v string) *field { f.Value = v; return f }
+func (f *field) required() *field                        { f.Required = true; return f }
+func (f *field) requiredWhen(fn func(*form) bool) *field { f.ReqFn = fn; return f }
+func (f *field) def(v string) *field                     { f.Value = v; return f }
 func (f *field) when(fn func(*form) bool) *field {
 	f.Show = fn
 	return f
@@ -645,12 +647,13 @@ func (f *form) validate() bool {
 	for _, fl := range f.visible() {
 		fl.err = ""
 		v := f.get(fl.Key)
+		req := fl.Required || (fl.ReqFn != nil && fl.ReqFn(f))
 		switch {
-		case fl.Required && fl.Kind == kindMulti && len(f.picked(fl.Key)) == 0:
+		case req && fl.Kind == kindMulti && len(f.picked(fl.Key)) == 0:
 			fl.err = "required"
-		case fl.Required && v == "" && fl.Kind != kindToggle && fl.Kind != kindMulti:
+		case req && v == "" && fl.Kind != kindToggle && fl.Kind != kindMulti:
 			fl.err = "required"
-		case fl.Validate != nil && (v != "" || fl.Required):
+		case fl.Validate != nil && (v != "" || req):
 			if err := fl.Validate(v); err != nil {
 				fl.err = err.Error()
 			}

@@ -21,10 +21,16 @@ Config lives in `~/.config/tummy/`: `connections.toml`, plus one file per replic
 type = "postgres"
 url = "postgres://user:${PG_PASS}@host:5432/db"
 
+[conn.MS]
+type = "mssql"
+url = "sqlserver://app%40tenant:${SP_SECRET}@host:1433?database=db&fedauth=ActiveDirectoryServicePrincipal"
+
 [conn.LOCAL]
 type = "sqlite"
 path = "local.db"
 ```
+
+URL schemes: `postgres://`, `mysql://`, `sqlserver://`. The UI composes the url from host, port, database, user, password and options. SQL Server named instance: host `srv\INST`. Entra auth: `fedauth=` with `ActiveDirectoryPassword`, `ActiveDirectoryServicePrincipal` (user `client id@tenant id`, password the secret), `ActiveDirectoryDefault`, `ActiveDirectoryManagedIdentity` or `ActiveDirectoryAzCli`.
 
 ```toml
 # replications/sales.toml

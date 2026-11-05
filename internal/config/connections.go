@@ -190,6 +190,8 @@ func (c *Conn) check() error {
 		}
 	} else if c.URL == "" {
 		return fail("url is required")
+	} else if err := CheckURL(t.Name(), c.URL); err != nil {
+		return fail("url: %v", err)
 	}
 	return nil
 }

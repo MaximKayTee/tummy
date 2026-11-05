@@ -34,7 +34,7 @@ var (
 	keyDown  = tea.KeyMsg{Type: tea.KeyDown}
 	keyUp    = tea.KeyMsg{Type: tea.KeyUp}
 	keyBack  = tea.KeyMsg{Type: tea.KeyBackspace}
-	keyTest  = tea.KeyMsg{Type: tea.KeyCtrlT}
+	keyTest  = tea.KeyMsg{Type: tea.KeyCtrlG}
 	keyAll   = tea.KeyMsg{Type: tea.KeyCtrlA}
 	keyNone  = tea.KeyMsg{Type: tea.KeyCtrlN}
 )
@@ -481,7 +481,7 @@ func TestConnWizardCreatesAndEdits(t *testing.T) {
 	f.set("path", "src.db") // relative to the connections file
 	res, cmd := w.update(keyTest)
 	if res != wizContinue || w.step != connTest || cmd == nil {
-		t.Fatalf("ctrl+t should probe: step=%d", w.step)
+		t.Fatalf("ctrl+g should probe: step=%d", w.step)
 	}
 	msg := cmd()
 	probe, ok := msg.(connProbeMsg)
@@ -1144,4 +1144,79 @@ func TestDetailDefinitionPanel(t *testing.T) {
 			t.Errorf("definition missing %q:\n%s", want, v)
 		}
 	}
+}
+
+func TestConnWizardComposesURL(t *testing.T) {
+	opts := testHome(t)
+	w, _ := newConnWizard(opts, "")
+	f := w.form
+	typeKeys(f, "MS")
+	f.set("type", "mssql")
+	f.set("host", `srv\INST`)
+	f.set("database", "db")
+	f.set("fedauth", "ActiveDirectoryServicePrincipal")
+	f.set("user", "app@tenant")
+	f.set("password", "${SP_SECRET}")
+	f.set("options", "encrypt = disable")
+	if !f.validate() {
+		t.Fatalf("validate: %v", formErrs(f))
+	}
+	want := "sqlserver://app%40tenant:${SP_SECRET}@srv/INST?database=db&encrypt=disable&fedauth=ActiveDirectoryServicePrincipal"
+	if got := w.conn().URL; got != want {
+		t.Fatalf("url\n got %s\nwant %s", got, want)
+	}
+	f.set("fedauth", "ActiveDirectoryDefault")
+	f.set("user", "")
+	if !f.validate() {
+		t.Fatalf("default auth needs no user: %v", formErrs(f))
+	}
+	if got := w.conn().URL; got != "sqlserver://srv/INST?database=db&encrypt=disable&fedauth=ActiveDirectoryDefault" {
+		t.Fatalf("url %s", got)
+	}
+	f.set("fedauth", "")
+	if f.validate() {
+		t.Fatal("sql login without user accepted")
+	}
+	f.set("user", "sa")
+	f.set("password", "p@ss")
+	f.set("port", "14330")
+	if res, _ := w.update(keySave); res != wizDone {
+		t.Fatalf("save: %v", formErrs(f))
+	}
+
+	// edit: fields come back from the url, and the written url is unchanged
+	w2, _ := newConnWizard(opts, "MS")
+	f2 := w2.form
+	for k, want := range map[string]string{"host": `srv\INST`, "port": "14330", "database": "db", "user": "sa", "password": "p@ss", "options": "encrypt = disable", "fedauth": ""} {
+		if got := f2.get(k); got != want {
+			t.Errorf("%s: got %q want %q", k, got, want)
+		}
+	}
+	if w2.conn().URL != w.conn().URL {
+		t.Fatalf("edit changed url: %s", w2.conn().URL)
+	}
+
+	// a key=value DSN is edited as written
+	c, _ := config.LoadConnectionsRaw(opts.Connections)
+	c.Conn["MS"].URL = "server=srv;user id=sa;password=x"
+	if err := config.WriteConnections(opts.Connections, c); err != nil {
+		t.Fatal(err)
+	}
+	w3, _ := newConnWizard(opts, "MS")
+	if h := w3.form.field("host"); h.Show(w3.form) || !w3.form.field("url").Show(w3.form) {
+		t.Fatal("raw url should show the url field")
+	}
+	if w3.conn().URL != "server=srv;user id=sa;password=x" {
+		t.Fatalf("raw url changed: %s", w3.conn().URL)
+	}
+}
+
+func formErrs(f *form) map[string]string {
+	out := map[string]string{}
+	for _, fl := range f.visible() {
+		if fl.err != "" {
+			out[fl.Key] = fl.err
+		}
+	}
+	return out
 }

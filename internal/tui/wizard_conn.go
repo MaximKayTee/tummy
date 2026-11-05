@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -103,10 +104,28 @@ type connWizard struct {
 	ask       *wizAsk
 }
 
-var urlExamples = map[string]string{
-	"postgres": "postgres://user:${PG_PASS}@host:5432/db?sslmode=disable",
-	"mysql":    "mysql://user:${MYSQL_PASS}@host:3306/db",
-	"mssql":    "sqlserver://user:${MSSQL_PASS}@host:1433?database=db",
+// entraModes are the fedauth values the form offers. "" is a SQL login.
+var entraModes = []string{"", "ActiveDirectoryPassword", "ActiveDirectoryServicePrincipal", "ActiveDirectoryDefault", "ActiveDirectoryManagedIdentity", "ActiveDirectoryAzCli"}
+
+var entraNotes = map[string]string{
+	"ActiveDirectoryPassword":         "Entra user and password",
+	"ActiveDirectoryServicePrincipal": "user: client id@tenant id, password: client secret",
+	"ActiveDirectoryDefault":          "env, managed identity, az login",
+	"ActiveDirectoryManagedIdentity":  "user: client id, blank: system assigned",
+	"ActiveDirectoryAzCli":            "az login on this machine",
+}
+
+// noPassword lists the Entra modes that take no password.
+func noPassword(mode string) bool {
+	return mode == "ActiveDirectoryDefault" || mode == "ActiveDirectoryManagedIdentity" || mode == "ActiveDirectoryAzCli"
+}
+
+// scheme is the url scheme for a type.
+func scheme(typ string) string {
+	if typ == "mssql" {
+		return "sqlserver"
+	}
+	return typ
 }
 
 func newConnWizard(opts Options, editing string) (*connWizard, error) {
@@ -124,6 +143,20 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 	}
 	c := w.base
 	isDB := func(f *form) bool { t := f.get("type"); return t != "api" && t != "sqlite" }
+	// An existing url that is not scheme://… (a key=value DSN, or one env reference) is edited as written.
+	parts, parsed := config.ParseURL(c.URL)
+	if c.Type == "api" {
+		parts.User, parts.Password = c.User, c.Password
+	}
+	if parts.Query == nil {
+		parts.Query = url.Values{}
+	}
+	if parts.Instance != "" {
+		parts.Host += `\` + parts.Instance
+	}
+	raw := c.URL != "" && !parsed
+	rawURL := func(f *form) bool { return isDB(f) && raw }
+	fields := func(f *form) bool { return isDB(f) && !raw }
 	isAPI := func(f *form) bool { return f.get("type") == "api" }
 	authIs := func(vals ...string) func(*form) bool {
 		return func(f *form) bool { return isAPI(f) && slices.Contains(vals, f.get("auth")) }
@@ -144,13 +177,28 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 			return nil
 		}),
 		choice("type", "Type", "", connTypes()...).def(cmp.Or(c.Type, "postgres")),
-		text("url", "URL", "").def(c.URL).when(isDB).required().masked().helpFn(func(f *form) string {
-			if f.get("url") != "" {
-				return "${VAR}: environment"
-			}
-			return urlExamples[f.get("type")] + "   ${VAR}: environment"
+		text("url", "URL", "${VAR}: environment").def(c.URL).when(rawURL).required().masked().check(func(v string) error {
+			return config.CheckURL(w.form.get("type"), v)
 		}),
-		combo("schema", "Schema", "for unqualified table names; ctrl+t lists them", "").empty("default").eg("public   dbo").def(c.Schema).when(isDB),
+		text("host", "Host", "").eg("db.example.com   srv\\SQLEXPRESS").def(parts.Host).when(fields).required(),
+		text("port", "Port", "").def(parts.Port).when(fields).helpFn(func(f *form) string {
+			return "blank: " + config.DefaultPort[f.get("type")]
+		}).check(func(v string) error {
+			if _, err := strconv.Atoi(v); err != nil {
+				return errors.New("a number")
+			}
+			return nil
+		}),
+		text("database", "Database", "").def(parts.Database).when(fields),
+		choice("fedauth", "Auth", "", entraModes...).empty("SQL login").notes(entraNotes).def(parts.Query.Get("fedauth")).when(func(f *form) bool { return fields(f) && f.get("type") == "mssql" }),
+		text("user", "User", "").def(parts.User).when(func(f *form) bool { return fields(f) || authIs("basic")(f) }).requiredWhen(func(f *form) bool {
+			return authIs("basic")(f) || !noPassword(f.get("fedauth"))
+		}),
+		secret("password", "Password", "${VAR}: environment").eg("${DB_PASS}").def(parts.Password).when(func(f *form) bool {
+			return (fields(f) && !noPassword(f.get("fedauth"))) || authIs("basic")(f)
+		}),
+		text("options", "Options", "driver parameters").eg(optionExamples).def(pairs(queryPairs(parts.Query))).when(fields).check(checkPairs),
+		combo("schema", "Schema", "for unqualified table names; ctrl+g lists them", "").empty("default").eg("public   dbo").def(c.Schema).when(isDB),
 		text("path", "Path", "relative to "+dir).eg("shop.db").def(c.Path).when(func(f *form) bool { return f.get("type") == "sqlite" }).required(),
 		text("base_url", "Base URL", "stream paths are appended").eg("https://api.example.com/v1").def(c.BaseURL).when(isAPI).required(),
 		choice("auth", "Auth", "", "", "bearer", "basic", "header", "query").empty("none").def(c.Auth).when(isAPI),
@@ -159,8 +207,6 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 		secret("token_h", "Key", "${VAR}: environment").eg("${API_KEY}").def(c.Token).when(authIs("header")).required(),
 		text("param", "Parameter", "").eg("api_key").def(c.Param).when(authIs("query")).required(),
 		secret("token_q", "Key", "${VAR}: environment").eg("${API_KEY}").def(c.Token).when(authIs("query")).required(),
-		text("user", "User", "").def(c.User).when(authIs("basic")).required(),
-		secret("password", "Password", "${VAR}: environment").eg("${API_PASS}").def(c.Password).when(authIs("basic")),
 		text("rate_limit", "Rate limit", "shared by every stream").eg("100/m   10/s   5000/h").def(c.RateLimit).when(isAPI).check(func(v string) error {
 			_, err := api.ParseRate(v)
 			return err
@@ -205,7 +251,7 @@ func (w *connWizard) footer() (string, string) {
 	case w.step == connTest:
 		return helpLine("ctrl+s", "save", "t", "test again"), helpLine("esc", "edit")
 	}
-	return helpLine(append(w.form.hints(), "ctrl+s", "save", "ctrl+t", "test")...), helpLine("esc", escWord(w.form, "cancel"))
+	return helpLine(append(w.form.hints(), "ctrl+s", "save", "ctrl+g", "test")...), helpLine("esc", escWord(w.form, "cancel"))
 }
 
 // escWord is what esc does: cancel an open list, else the given word.
@@ -222,7 +268,7 @@ func (w *connWizard) dirty() bool  { return w.form.changed() }
 func (w *connWizard) keyHelp() (string, [][2]string) {
 	return "connection", [][2]string{
 		{"ctrl+s", "save"},
-		{"ctrl+t", "test: connect, list tables and schemas"},
+		{"ctrl+g", "test: connect, list tables and schemas"},
 		{"c", "after a test: create a missing sqlite file"},
 		{"esc", "cancel"},
 	}
@@ -270,7 +316,27 @@ func (w *connWizard) conn() *config.Conn {
 		}
 		c.Timeout = f.get("timeout")
 	default:
-		c.URL, c.Schema = f.get("url"), f.get("schema")
+		c.Schema = f.get("schema")
+		if fl := f.field("host"); fl == nil || (fl.Show != nil && !fl.Show(f)) {
+			c.URL = f.get("url")
+			break
+		}
+		p := config.URLParts{Scheme: scheme(c.Type), Host: f.get("host"), Port: f.get("port"), Database: f.get("database"), User: f.get("user"), Query: url.Values{}}
+		if h, inst, has := strings.Cut(p.Host, "\\"); has && c.Type == "mssql" {
+			p.Host, p.Instance = h, inst
+		}
+		if !noPassword(f.get("fedauth")) {
+			p.Password = f.get("password")
+		}
+		if opts, _ := parsePairs(f.get("options")); opts != nil {
+			for k, v := range opts {
+				p.Query.Set(k, v)
+			}
+		}
+		if m := f.get("fedauth"); m != "" {
+			p.Query.Set("fedauth", m)
+		}
+		c.URL = p.String()
 	}
 	if c.Type != "api" {
 		c.Headers, c.Timeout = nil, ""
@@ -301,7 +367,7 @@ func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 			case "esc", "backspace":
 				w.step = connEdit
 				return wizContinue, w.form.focus()
-			case "t", "ctrl+t":
+			case "t", "ctrl+g":
 				return wizContinue, w.startProbe()
 			case "c":
 				if path := w.canCreate(); path != "" {
@@ -317,7 +383,7 @@ func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 			return wizContinue, nil
 		}
 		switch msg.String() {
-		case "ctrl+t":
+		case "ctrl+g":
 			w.form.commit()
 			if !w.form.validate() {
 				return wizContinue, w.form.focus()
@@ -562,4 +628,17 @@ func pairs(m map[string]string) string {
 	}
 	sort.Strings(parts)
 	return strings.Join(parts, ", ")
+}
+
+const optionExamples = "sslmode = disable   encrypt = disable, trustservercertificate = true"
+
+// queryPairs flattens a query to its first values, fedauth left out: the Auth field holds it.
+func queryPairs(q url.Values) map[string]string {
+	out := map[string]string{}
+	for k, v := range q {
+		if k != "fedauth" && len(v) > 0 {
+			out[k] = v[0]
+		}
+	}
+	return out
 }

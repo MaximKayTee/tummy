@@ -338,3 +338,47 @@ func TestPreviewWrite(t *testing.T) {
 		t.Fatalf("invalid draft: %v\n%s", err, text)
 	}
 }
+
+func TestURLRoundTrip(t *testing.T) {
+	for _, raw := range []string{
+		"postgres://user:${PG_PASS}@host:5432/db?sslmode=disable",
+		"mysql://user:p%40ss@host/db",
+		"sqlserver://user:${MSSQL_PASS}@host:1433?database=db",
+		"sqlserver://app%40tenant:secret@host/INST?database=db&fedauth=ActiveDirectoryServicePrincipal",
+		"sqlserver://host?fedauth=ActiveDirectoryDefault",
+	} {
+		p, ok := ParseURL(raw)
+		if !ok {
+			t.Fatalf("%s: not parsed", raw)
+		}
+		if got := p.String(); got != raw {
+			t.Errorf("%s\n got %s", raw, got)
+		}
+	}
+	p, _ := ParseURL("mysql://user:p%40ss@host/db")
+	if p.Password != "p@ss" || p.Host != "host" || p.Database != "db" {
+		t.Errorf("parts %+v", p)
+	}
+	p, _ = ParseURL("sqlserver://u@srv/INST?database=db")
+	if p.Instance != "INST" || p.Database != "db" || p.User != "u" || len(p.Query) != 0 {
+		t.Errorf("parts %+v", p)
+	}
+}
+
+func TestCheckURL(t *testing.T) {
+	bad := []string{"myhost", "myhost:1433", "user:pw@myhost", "mssql://u:p@h"}
+	for _, u := range bad {
+		if CheckURL("mssql", u) == nil {
+			t.Errorf("%s: accepted", u)
+		}
+	}
+	good := []string{"sqlserver://u:p@h", "server=h;user id=u", "${MSSQL_URL}"}
+	for _, u := range good {
+		if err := CheckURL("mssql", u); err != nil {
+			t.Errorf("%s: %v", u, err)
+		}
+	}
+	if CheckURL("postgres", "postgresql://u@h/db") != nil || CheckURL("mysql", "u:p@tcp(h)/db") != nil {
+		t.Error("native forms rejected")
+	}
+}

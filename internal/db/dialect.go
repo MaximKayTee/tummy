@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/microsoft/go-mssqldb/azuread"
 )
 
 // Dialect is everything that differs between engines.
@@ -369,7 +371,9 @@ func (mssql) Derived(sql string) string {
 	}
 	return sql
 }
-func (mssql) driver(p Params) (string, string, error) { return "sqlserver", p.URL, nil }
+
+// driver uses the azuread wrapper: plain logins pass through, fedauth= selects Entra.
+func (mssql) driver(p Params) (string, string, error) { return azuread.DriverName, p.URL, nil }
 func (mssql) maxOpenConns() int                       { return 0 }
 
 // ---------- sqlite ----------

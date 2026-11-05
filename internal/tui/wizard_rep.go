@@ -529,7 +529,7 @@ func (w *repWizard) footer() (string, string) {
 	case w.stream != nil:
 		keys := append(w.stream.hints(), "ctrl+s", save)
 		if w.isAPI() {
-			keys = append(keys, "ctrl+t", "sample")
+			keys = append(keys, "ctrl+g", "sample")
 		}
 		return helpLine(keys...), helpLine("esc", escWord(w.stream, "cancel"))
 	case w.colsFor != "":
@@ -591,7 +591,7 @@ func (w *repWizard) keyHelp() (string, [][2]string) {
 	case w.stream != nil:
 		rows := [][2]string{{"ctrl+s", "save the stream"}, {"esc", "cancel"}}
 		if w.isAPI() {
-			rows = append(rows, [2]string{"ctrl+t", "fetch a page: the key fields list its columns"})
+			rows = append(rows, [2]string{"ctrl+g", "fetch a page: the key fields list its columns"})
 		}
 		return "stream", rows
 	}
@@ -1035,7 +1035,7 @@ func (w *repWizard) edit(i int) tea.Cmd {
 }
 
 func (w *repWizard) keyStream(msg tea.KeyMsg) (wizResult, tea.Cmd) {
-	if msg.String() == "ctrl+t" && w.isAPI() {
+	if msg.String() == "ctrl+g" && w.isAPI() {
 		w.stream.commit()
 		return wizContinue, w.sample()
 	}
