@@ -537,13 +537,13 @@ func (w *repWizard) footer() (string, string) {
 	}
 	jump := []string{}
 	if w.entry == entryFull {
-		jump = []string{"1-4", "step"}
+		jump = []string{"f2/f3", "step", "1-4", "step"}
 	}
 	switch w.step {
 	case stepBasics:
-		return helpLine(append(w.basics.hints(), "ctrl+s", save)...), helpLine("esc", escWord(w.basics, "cancel"))
+		return helpLine(append(w.basics.hints(), "ctrl+s", save, "f3", "next step")...), helpLine("esc", escWord(w.basics, "cancel"))
 	case stepDefaults:
-		return helpLine(append(w.defaults.hints(), "ctrl+s", save)...), helpLine("esc", escWord(w.defaults, "back"))
+		return helpLine(append(w.defaults.hints(), "ctrl+s", save, "f2/f3", "step")...), helpLine("esc", escWord(w.defaults, "back"))
 	case stepStreams:
 		add := "add tables"
 		if w.isAPI() {
@@ -597,7 +597,7 @@ func (w *repWizard) keyHelp() (string, [][2]string) {
 	}
 	if w.entry == entryFull {
 		rows = append(rows, [2]string{"enter", "next field, next step on the last"}, [2]string{"ctrl+s", "review, then save"},
-			[2]string{"1 2 3 4", "step, when not typing"}, [2]string{"esc", "previous step; cancel on the first"})
+			[2]string{"f2 / f3", "previous / next step"}, [2]string{"1 2 3 4", "step, when not typing"}, [2]string{"esc", "previous step; cancel on the first"})
 	}
 	if w.step == stepStreams {
 		rows = append(rows, [2]string{"a", "add tables or an endpoint"}, [2]string{"enter / E", "edit the stream"},
@@ -794,6 +794,12 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	}
 	if k := msg.String(); w.entry == entryFull && len(k) == 1 && k >= "1" && k <= "4" && !w.typing() {
 		return w.jump(repStep(k[0] - '1'))
+	}
+	if k := msg.String(); w.entry == entryFull && w.child == nil && w.pick == nil && w.ask == nil && w.stream == nil && (k == "f2" || k == "f3") {
+		if k == "f2" {
+			return w.jump(max(w.step-1, stepBasics))
+		}
+		return w.jump(min(w.step+1, stepReview))
 	}
 	switch w.step {
 	case stepBasics:
