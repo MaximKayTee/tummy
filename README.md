@@ -7,8 +7,8 @@ Connections and replications are TOML files. `tummy serve` runs replications on 
 ## Build
 
 ```
-go build -o ~/.local/bin/tummy ./cmd/tummy
-go test ./...
+make install     # ~/.local/bin/tummy
+make check       # gofmt, vet, tests
 ```
 
 ## Config
@@ -84,5 +84,9 @@ systemctl --user enable --now tummy
 ```
 
 ## Development
+
+`make check` before a commit. Tests drive the TUI through its model (`internal/tui/*_test.go`), no terminal needed.
+
+Layout: `cmd/tummy` CLI, `internal/config` TOML, `internal/db` dialects, `internal/engine` runs, `internal/steps` transforms, `internal/api` REST sources, `internal/state` run history, `internal/daemon` scheduler, `internal/tui` screens.
 
 `scripts/dev.sh` builds a sandbox in `.dev/` (local Postgres, seeded SQLite files, config) and opens the UI. Needs the `postgresql` package.
