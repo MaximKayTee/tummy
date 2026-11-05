@@ -552,6 +552,9 @@ func (w *repWizard) footer() (string, string) {
 			add = "add endpoint"
 		}
 		keys := []string{"a", add}
+		if !w.isAPI() {
+			keys = append(keys, "s", "sql query")
+		}
 		if len(w.draft.Streams) > 0 {
 			keys = append(keys, "enter", "data, sql, steps", "E", "settings", "e", "on/off", "d", "delete")
 		}
@@ -608,7 +611,7 @@ func (w *repWizard) keyHelp() (string, [][2]string) {
 			[2]string{"f2 / f3", "previous / next step"}, [2]string{"1 2 3 4", "step, when not typing"}, [2]string{"esc", "previous step; cancel on the first"})
 	}
 	if w.step == stepStreams {
-		rows = append(rows, [2]string{"a", "add tables or an endpoint"}, [2]string{"enter", "the stream on its data: sql, columns, steps; ctrl+s saves into the draft"}, [2]string{"E", "settings: object, mode, keys, where, limit"},
+		rows = append(rows, [2]string{"a", "add tables or an endpoint"}, [2]string{"s", "a query on the source; + adds it as a stream"}, [2]string{"enter", "the stream on its data: sql, columns, steps; ctrl+s saves into the draft"}, [2]string{"E", "settings: object, mode, keys, where, limit"},
 			[2]string{"e", "stream on/off"}, [2]string{"d", "delete the stream (y/n)"})
 	}
 	if w.step == stepReview {
@@ -766,6 +769,23 @@ func (w *repWizard) exploreUpdate(msg tea.Msg) (wizResult, tea.Cmd) {
 	}
 	w.explore = nil
 	return wizContinue, nil
+}
+
+// exploreSQL opens the explorer on the source with the SQL editor: + adds the query as a
+// stream of the draft.
+func (w *repWizard) exploreSQL() tea.Cmd {
+	e, err := newExplorer(w.opts, w.draft.Source)
+	if err != nil {
+		w.err = err.Error()
+		return nil
+	}
+	e.bound, e.repName, e.tables = &w.draft, w.draft.Name, w.srcTables
+	e.resetPreview()
+	e.page = pagePreview
+	e.editSQL = true
+	e.sqlInput.SetValue("")
+	w.explore, w.err = e, ""
+	return e.sqlInput.Focus()
 }
 
 // exploreStream opens draft stream i in the explorer, bound to the draft.
@@ -943,6 +963,10 @@ func (w *repWizard) keyStreams(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		w.cur = max(n-1, 0)
 	case "a":
 		return wizContinue, w.add()
+	case "s":
+		if !w.isAPI() {
+			return wizContinue, w.exploreSQL()
+		}
 	case "enter":
 		if w.cur < n {
 			return wizContinue, w.exploreStream(w.cur)

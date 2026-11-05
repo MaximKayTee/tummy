@@ -1160,6 +1160,26 @@ func TestWizardEnterExploresDraftStream(t *testing.T) {
 	if w.explore != nil || w.step != stepStreams {
 		t.Fatalf("esc returns to the streams step: %v %d", w.explore, w.step)
 	}
+	// s: a query on the source, + adds it to the draft
+	send(t, w, keyRunes("s"))
+	e = w.explore
+	if e == nil || !e.editSQL || e.bound != &w.draft {
+		t.Fatalf("s should open the sql editor on the draft: %+v", e)
+	}
+	e.sqlInput.SetValue("select id from things where id > 1")
+	press1(e, keySave)
+	if len(e.cols) != 1 || e.fetchErr != "" {
+		t.Fatalf("sql preview: %+v %s", e.cols, e.fetchErr)
+	}
+	e.update(keyRunes("+"))
+	if e.page != pageStream || e.stream == nil {
+		t.Fatalf("+ should open the stream form on the draft: page %d", e.page)
+	}
+	e.stream.set("name", "big_things")
+	send(t, w, keySave)
+	if len(w.draft.Streams) != 2 || w.draft.Streams[1].Name != "big_things" || w.draft.Streams[1].Stream.SQL != "select id from things where id > 1" {
+		t.Fatalf("query stream in the draft: %+v", w.draft.Streams)
+	}
 	if _, err := os.Stat(filepath.Join(config.ReplicationsDir(opts.Home), "draft.toml")); err == nil {
 		t.Fatal("nothing written to disk")
 	}
