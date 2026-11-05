@@ -52,6 +52,10 @@ func TestNormalize(t *testing.T) {
 	if s := normalize([]byte("x"), Column{Kind: String}); s != "x" {
 		t.Fatalf("text: %v", s)
 	}
+	// go-mssqldb reads time as 0001-01-01 plus the time of day; pgx cannot bind it to text
+	if s := normalize(time.Date(1, 1, 1, 10, 30, 15, 123456700, time.UTC), Column{Kind: String, Type: "TIME"}); s != "10:30:15.1234567" {
+		t.Fatalf("mssql time: %v", s)
+	}
 }
 
 func TestMySQLDSNHidesPassword(t *testing.T) {

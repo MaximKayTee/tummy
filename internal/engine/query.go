@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -146,16 +147,36 @@ func RunQuery(ctx context.Context, src *db.DB, s config.ResolvedStream, wm any) 
 	return q, args, nil
 }
 
-// watermark is MAX(update_key) of an existing incremental target, or nil.
+// watermark is the highest update key of an existing incremental target, or nil. The
+// update key is matched to the target's columns ignoring case: the source may spell it
+// differently, and postgres compares quoted names exactly.
 func watermark(ctx context.Context, tgt *db.DB, s stream, target db.Table, exists bool) (any, error) {
 	if s.Mode != "incremental" || s.UpdateKey == "" || !exists {
 		return nil, nil
 	}
-	wm, err := tgt.Max(ctx, target, s.UpdateKey)
+	cols, err := tgt.Columns(ctx, target)
+	if err != nil {
+		return nil, fmt.Errorf("watermark: %w", err)
+	}
+	i := slices.IndexFunc(cols, func(c db.Column) bool { return strings.EqualFold(c.Name, s.UpdateKey) })
+	if i < 0 {
+		return nil, fmt.Errorf("watermark: %s has no column %s", target, s.UpdateKey)
+	}
+	wm, err := tgt.Max(ctx, target, cols[i])
 	if err != nil {
 		return nil, fmt.Errorf("watermark: %w", err)
 	}
 	return wm, nil
+}
+
+// spelled is the name in names that matches col ignoring case, else col as written.
+func spelled(names []string, col string) string {
+	for _, n := range names {
+		if strings.EqualFold(n, col) {
+			return n
+		}
+	}
+	return col
 }
 
 // bound is the update-key condition of a run: operators and their values.
@@ -230,16 +251,26 @@ func sourceQuery(ctx context.Context, src *db.DB, s stream, wm any) (string, []a
 		b = bound{}
 	}
 
+	// the update key as the source query spells it, for the condition and the order
+	uk := s.UpdateKey
+	needKey := uk != "" && (len(b.ops) > 0 || s.Limit > 0 && s.Mode == "incremental")
+	plainSpec := s.Stream
+	plainSpec.SQL = strings.ReplaceAll(plainSpec.SQL, incrementalCond, "1=1")
 	var q string
 	if spec.Steps == "" {
-		q = selectSQL(dl, spec, s.table, cond(s.UpdateKey))
+		if needKey && src.DB != nil { // without a connection (tests) the key stays as written
+			names, err := probe(ctx, src, selectSQL(dl, plainSpec, s.table, ""))
+			if err != nil {
+				return "", nil, err
+			}
+			uk = spelled(names, uk)
+		}
+		q = selectSQL(dl, spec, s.table, cond(uk))
 	} else {
 		pipeline, err := steps.Parse(spec.Steps)
 		if err != nil {
 			return "", nil, fmt.Errorf("steps: %w", err)
 		}
-		plainSpec := s.Stream
-		plainSpec.SQL = strings.ReplaceAll(plainSpec.SQL, incrementalCond, "1=1")
 		cols, err := probe(ctx, src, selectSQL(dl, plainSpec, s.table, ""))
 		if err != nil {
 			return "", nil, err
@@ -248,22 +279,25 @@ func sourceQuery(ctx context.Context, src *db.DB, s stream, wm any) (string, []a
 		if err != nil {
 			return "", nil, fmt.Errorf("steps: %w", err)
 		}
+		if n := len(c.Columns); n > 0 {
+			uk = spelled(c.Columns[n-1], uk)
+		}
 		q = c.SQL
 		if len(b.ops) > 0 {
-			if origin, ok := c.Origin(s.UpdateKey); ok {
+			if origin, ok := c.Origin(uk); ok {
 				q, err = steps.Compile(selectSQL(dl, spec, s.table, render(origin)), true, cols, pipeline, dl)
 				if err != nil {
 					return "", nil, fmt.Errorf("steps: %w", err)
 				}
 			} else {
-				q = db.Wrap(dl, q, "*", "_w") + " WHERE " + render(s.UpdateKey)
+				q = db.Wrap(dl, q, "*", "_w") + " WHERE " + render(uk)
 			}
 		}
 	}
 	if s.Limit > 0 {
 		order := ""
-		if s.Mode == "incremental" && s.UpdateKey != "" {
-			order = dl.Quote(s.UpdateKey) // oldest first
+		if s.Mode == "incremental" && uk != "" {
+			order = dl.Quote(uk) // oldest first
 		}
 		q = dl.OrderLimit(q, order, s.Limit)
 	}

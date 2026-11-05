@@ -87,8 +87,14 @@ func InsertSelectSQL(dl Dialect, target, src Table, cols []Column) string {
 	return "INSERT INTO " + QuoteTable(dl, target) + " (" + list + ") SELECT " + list + " FROM " + QuoteTable(dl, src)
 }
 
-func MaxSQL(dl Dialect, t Table, col string) string {
-	return "SELECT MAX(" + dl.Quote(col) + ") FROM " + QuoteTable(dl, t)
+// MaxSQL selects the highest value of c in t. Bytes take the first in descending order:
+// postgres before 18 has no MAX for bytea.
+func MaxSQL(dl Dialect, t Table, c Column) string {
+	q := dl.Quote(c.Name)
+	if c.Kind == Bytes {
+		return dl.OrderLimit("SELECT "+q+" FROM "+QuoteTable(dl, t)+" WHERE "+q+" IS NOT NULL", q+" DESC", 1)
+	}
+	return "SELECT MAX(" + q + ") FROM " + QuoteTable(dl, t)
 }
 
 // DuplicatesSQL returns one row when two rows of t share keys.

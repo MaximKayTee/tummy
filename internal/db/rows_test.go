@@ -54,7 +54,7 @@ func TestSQLiteTypesRoundTrip(t *testing.T) {
 			t.Errorf("%s: %s", c.Name, c.Kind)
 		}
 	}
-	m, err := d.Max(ctx, Table{Name: "t"}, "ok")
+	m, err := d.Max(ctx, Table{Name: "t"}, Column{Name: "ok", Kind: Bool})
 	if err != nil || m != int64(1) {
 		t.Fatalf("max: %v %v", m, err)
 	}

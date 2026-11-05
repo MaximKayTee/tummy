@@ -74,9 +74,10 @@ func (m Model) planNow(rep replication, sample bool) tea.Cmd {
 }
 
 type connTestMsg struct {
-	Name string
-	Err  error
-	Took time.Duration
+	Name   string
+	Err    error
+	Took   time.Duration
+	Tables []string // listed by the test, kept for explore
 }
 
 // daemonServes reports whether a live daemon runs this config home's replications.
@@ -188,10 +189,8 @@ func (m Model) testConn(name string) tea.Cmd {
 		if !ok {
 			return connTestMsg{Name: name, Err: errors.New("no connection " + name)}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		res, err := probe.Conn(ctx, c, "")
-		return connTestMsg{Name: name, Err: err, Took: res.Took}
+		res := probeNow(c)
+		return connTestMsg{Name: name, Err: res.Err, Took: res.Took, Tables: res.Tables}
 	}
 }
 

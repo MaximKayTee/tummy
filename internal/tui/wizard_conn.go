@@ -491,9 +491,29 @@ func (w *connWizard) startProbe() tea.Cmd {
 	return func() tea.Msg { return openConn(c, seq) }
 }
 
+// A connection test may take connectBudget to connect, then listBudget to list: a slow
+// catalog of thousands of tables lists for minutes.
+const (
+	connectBudget = 30 * time.Second
+	listBudget    = 5 * time.Minute
+)
+
+// probeNow is a whole test in one step: the connect and listing steps of the editor's
+// test, with their budgets. The connections view runs it.
+func probeNow(c *config.Conn) connProbeMsg {
+	if c.Type == "api" || c.Type == "sqlite" {
+		return probeConn(c, 0)
+	}
+	open := openConn(c, 0).(connOpenMsg)
+	if open.Err != nil {
+		return connProbeMsg{Name: c.Name, Err: open.Err, Took: open.Took}
+	}
+	return listTablesCmd(open)().(connProbeMsg)
+}
+
 // probeConn reaches an API or opens a sqlite file and lists its tables, in one step.
 func probeConn(c *config.Conn, seq int) connProbeMsg {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), connectBudget)
 	defer cancel()
 	res, err := probe.Conn(ctx, c, probe.AllSchemas)
 	return connProbeMsg{Name: c.Name, Tables: res.Tables, Err: err, Took: res.Took, seq: seq}
@@ -508,7 +528,7 @@ func noDatabase(c *config.Conn) bool {
 // openConn is the connect step of a database test. Postgres needs a database to log
 // into: without one the maintenance database stands in.
 func openConn(c *config.Conn, seq int) tea.Msg {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), connectBudget)
 	defer cancel()
 	start := time.Now()
 	x := *c
@@ -524,7 +544,7 @@ func openConn(c *config.Conn, seq int) tea.Msg {
 // listTablesCmd is the listing step: every schema's tables, then the schema names.
 func listTablesCmd(open connOpenMsg) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), listBudget)
 		defer cancel()
 		defer open.DB.Close()
 		start := time.Now()

@@ -25,6 +25,9 @@ CREATE INDEX `_tummy_ix_orders` ON `s`.`orders` (`id`, `code`)
 -- max
 SELECT MAX(`at`) FROM `s`.`orders`
 
+-- max bytes
+SELECT * FROM (SELECT `blob` FROM `s`.`orders` WHERE `blob` IS NOT NULL) AS _t ORDER BY `blob` DESC LIMIT 1
+
 -- duplicates
 SELECT 1 AS d FROM `s`.`_tummy_tmp_orders` GROUP BY `id`, `code` HAVING COUNT(*) > 1 LIMIT 1
 

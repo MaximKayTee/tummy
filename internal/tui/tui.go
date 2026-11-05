@@ -255,6 +255,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case connTestMsg:
 		delete(m.testing, msg.Name)
+		if msg.Err == nil && len(msg.Tables) > 0 {
+			m.tableLists[msg.Name] = msg.Tables
+		}
+		msg.Tables = nil
 		m.connResults[msg.Name] = msg
 		return m, nil
 

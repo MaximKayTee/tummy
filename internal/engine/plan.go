@@ -101,6 +101,9 @@ func (e *Engine) plan(ctx context.Context, r *config.Replication, sample int) ([
 			return nil, fmt.Errorf("source tables: %w", err)
 		}
 	}
+	if err := sharedTarget(tgt, streams); err != nil {
+		return nil, fmt.Errorf("targets: %w", err)
+	}
 	// the target's tables once, not one lookup per stream: a wildcard can be thousands
 	listed, err := tgt.ListAllTables(ctx)
 	if err != nil {

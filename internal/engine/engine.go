@@ -201,6 +201,9 @@ func (e *Engine) run(ctx context.Context, r *config.Replication, only []string) 
 			return e.openDB(ctx, src, tgt, s, target, exists, timeout)
 		}
 	}
+	if err := sharedTarget(tgt, streams); err != nil {
+		return nil, err
+	}
 
 	want, err := wanted(streams, only)
 	if err != nil {
@@ -610,6 +613,30 @@ func targetTable(tgt *db.DB, s stream) db.Table {
 		t.Schema = tgt.Schema
 	}
 	return t
+}
+
+// sharedTarget fails when two enabled streams load into one target table: the second
+// would replace or merge into the first. Names are compared as the target stores them.
+func sharedTarget(tgt *db.DB, streams []stream) error {
+	seen := map[string]db.Table{}
+	from := map[string]string{}
+	for _, s := range streams {
+		if s.Disabled {
+			continue
+		}
+		t := targetTable(tgt, s)
+		k := tgt.TableKey(t)
+		prev, ok := seen[k]
+		if !ok {
+			seen[k], from[k] = t, s.Name
+			continue
+		}
+		if prev.String() == t.String() {
+			return fmt.Errorf("streams %s and %s both load into %s", from[k], s.Name, t)
+		}
+		return fmt.Errorf("streams %s and %s both load into one table: %s and %s are the same name on %s", from[k], s.Name, prev, t, tgt.Dialect.Name())
+	}
+	return nil
 }
 
 // finalize moves the temp table into the target according to mode.

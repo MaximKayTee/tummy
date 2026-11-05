@@ -2,6 +2,7 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"fmt"
@@ -66,6 +67,48 @@ func (t Table) String() string {
 // Plain reports names that survive String and ParseTable unchanged: no dots, quotes or brackets.
 func (t Table) Plain() bool {
 	return !strings.ContainsAny(t.Schema+t.Name, ".\"`[]'") && t.Name != ""
+}
+
+// TableKey identifies t as the engine stores it, so two names for one table compare
+// equal: postgres keeps the first 63 bytes of a name, mssql and mysql ignore case,
+// sqlite ignores ASCII case and schemas. An empty schema is the connection's.
+func (d *DB) TableKey(t Table) string {
+	schema := cmp.Or(t.Schema, d.Schema)
+	switch d.Dialect.Name() {
+	case "postgres":
+		return pgName(cmp.Or(schema, "public")) + "\x00" + pgName(t.Name)
+	case "sqlite":
+		return asciiLower(t.Name)
+	case "mssql":
+		schema = cmp.Or(schema, "dbo")
+	}
+	return strings.ToLower(schema) + "\x00" + strings.ToLower(t.Name)
+}
+
+// pgName is s as postgres stores an identifier: at most 63 bytes, cut at a character
+// boundary.
+func pgName(s string) string {
+	if len(s) <= 63 {
+		return s
+	}
+	cut := 0
+	for i := range s {
+		if i > 63 {
+			break
+		}
+		cut = i
+	}
+	return s[:cut]
+}
+
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
 }
 
 // DB wraps a sql.DB with its dialect.
@@ -329,9 +372,10 @@ func (d *DB) ExecAll(ctx context.Context, inTx bool, stmts ...string) error {
 	return nil
 }
 
-// Max returns MAX(col) from t as the column's kind, or nil if the table is empty.
-func (d *DB) Max(ctx context.Context, t Table, col string) (any, error) {
-	rd, err := d.Query(ctx, MaxSQL(d.Dialect, t, col))
+// Max returns the highest value of column c in t as the column's kind, or nil if there
+// is none.
+func (d *DB) Max(ctx context.Context, t Table, c Column) (any, error) {
+	rd, err := d.Query(ctx, MaxSQL(d.Dialect, t, c))
 	if err != nil {
 		return nil, err
 	}
@@ -358,6 +402,12 @@ func normalize(v any, c Column) any {
 		}
 		return string(x)
 	case time.Time:
+		if c.Kind == String { // mssql time is a time of day; a text column takes text
+			if c.Type == "TIME" {
+				return x.Format("15:04:05.999999999")
+			}
+			return x.UTC().Format(time.RFC3339Nano)
+		}
 		return x.UTC()
 	case int64:
 		if c.Kind == Bool { // sqlite BOOLEAN
