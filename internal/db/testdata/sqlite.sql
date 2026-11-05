@@ -1,3 +1,6 @@
+-- create schema
+
+
 -- create
 CREATE TABLE "_tummy_tmp_orders" ("id" INTEGER, "code" TEXT, "note" TEXT, "total" NUMERIC, "rate" NUMERIC, "ok" BOOLEAN, "at" TIMESTAMP, "day" DATE, "meta" TEXT, "blob" BLOB, "f" REAL)
 

@@ -60,7 +60,6 @@ func pgSetup(t *testing.T) *pgFixture {
 		"SRC":  {Name: "SRC", Type: "postgres", URL: dsn},
 		"LITE": {Name: "LITE", Type: "sqlite", Path: filepath.Join(f.dir, "lite.db")},
 	}}
-	f.exec("CREATE SCHEMA " + schema + "_out")
 	f.st, err = state.Open(filepath.Join(f.dir, "state.db"))
 	if err != nil {
 		t.Fatal(err)

@@ -1,3 +1,6 @@
+-- create schema
+CREATE DATABASE IF NOT EXISTS `out`
+
 -- create
 CREATE TABLE `s`.`_tummy_tmp_orders` (`id` bigint, `code` varchar(255), `note` longtext, `total` decimal(10,2), `rate` decimal(38,10), `ok` tinyint(1), `at` datetime(6), `day` date, `meta` json, `blob` longblob, `f` double)
 

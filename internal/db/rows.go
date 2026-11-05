@@ -53,7 +53,32 @@ func (r *Reader) Close() error { return r.rows.Close() }
 
 // CreateTable issues CREATE TABLE with the dialect's types. keys get key-sized string types.
 func (d *DB) CreateTable(ctx context.Context, t Table, cols []Column, keys []string) error {
+	if err := d.EnsureSchema(ctx, t.Schema); err != nil {
+		return err
+	}
 	return d.Exec(ctx, CreateTableSQL(d.Dialect, t, cols, keys))
+}
+
+// EnsureSchema creates schema on engines that have them, once per connection.
+func (d *DB) EnsureSchema(ctx context.Context, schema string) error {
+	if schema == "" || !d.Dialect.HasSchemas() {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.schemas[schema] {
+		return nil
+	}
+	if q := d.Dialect.CreateSchema(schema); q != "" {
+		if err := d.Exec(ctx, q); err != nil {
+			return fmt.Errorf("create schema %s: %w", schema, err)
+		}
+	}
+	if d.schemas == nil {
+		d.schemas = map[string]bool{}
+	}
+	d.schemas[schema] = true
+	return nil
 }
 
 // DropTable drops t if it exists.

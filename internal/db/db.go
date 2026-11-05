@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -73,6 +74,8 @@ type DB struct {
 	Dialect Dialect
 	Name    string
 	Schema  string // default schema from the connection
+	mu      sync.Mutex
+	schemas map[string]bool // created or seen by EnsureSchema
 }
 
 func (d *DB) Quote(t Table) string { return QuoteTable(d.Dialect, t) }

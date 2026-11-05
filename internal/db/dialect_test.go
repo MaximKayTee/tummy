@@ -50,6 +50,7 @@ func render(dl Dialect) string {
 	keys := []string{"id", "code"}
 	var b strings.Builder
 	line := func(label, sql string) { fmt.Fprintf(&b, "-- %s\n%s\n\n", label, sql) }
+	line("create schema", dl.CreateSchema("out"))
 	line("create", CreateTableSQL(dl, tmp, cols, keys))
 	line("insert 2 rows", InsertSQL(dl, tmp, cols[:3], 2))
 	line("insert select", InsertSelectSQL(dl, tgt, tmp, cols[:3]))

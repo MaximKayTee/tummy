@@ -26,6 +26,8 @@ type Dialect interface {
 	// CastType is the type for CAST(x AS ...).
 	CastType(k Kind) string
 	TableExists(t Table, defaultSchema string) (string, []any)
+	// CreateSchema creates schema when it does not exist; "" when the engine has none.
+	CreateSchema(schema string) string
 	ListTables(schema, defaultSchema string) (string, []any)
 	// PrimaryKey lists the primary-key columns of t in key order, one per row.
 	PrimaryKey(t Table, defaultSchema string) (string, []any)
@@ -152,6 +154,7 @@ func (postgres) TableExists(t Table, def string) (string, []any) {
 	return "SELECT count(*) FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2",
 		[]any{cmp.Or(t.Schema, def, "public"), t.Name}
 }
+func (d postgres) CreateSchema(s string) string { return "CREATE SCHEMA IF NOT EXISTS " + d.Quote(s) }
 func (postgres) ListTables(schema, def string) (string, []any) {
 	if schema == AllSchemas {
 		return "SELECT table_schema, table_name FROM information_schema.tables WHERE table_type IN ('BASE TABLE','VIEW') ORDER BY 1, 2", nil
@@ -240,6 +243,7 @@ func (mysql) TableExists(t Table, def string) (string, []any) {
 	}
 	return "SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?", []any{t.Name}
 }
+func (d mysql) CreateSchema(s string) string { return "CREATE DATABASE IF NOT EXISTS " + d.Quote(s) }
 func (mysql) ListTables(schema, def string) (string, []any) {
 	if schema == AllSchemas {
 		return "SELECT table_schema, table_name FROM information_schema.tables ORDER BY 1, 2", nil
@@ -333,6 +337,9 @@ func (d mssql) CastType(k Kind) string { return d.TypeName(Column{Kind: k}, fals
 func (mssql) TableExists(t Table, def string) (string, []any) {
 	return "SELECT count(*) FROM information_schema.tables WHERE table_schema = @p1 AND table_name = @p2",
 		[]any{cmp.Or(t.Schema, def, "dbo"), t.Name}
+}
+func (d mssql) CreateSchema(s string) string {
+	return "IF SCHEMA_ID(N'" + strings.ReplaceAll(s, "'", "''") + "') IS NULL EXEC('CREATE SCHEMA " + strings.ReplaceAll(d.Quote(s), "'", "''") + "')"
 }
 func (mssql) ListTables(schema, def string) (string, []any) {
 	if schema == AllSchemas {
@@ -434,6 +441,7 @@ func (sqlite) CastType(k Kind) string {
 func (sqlite) TableExists(t Table, _ string) (string, []any) {
 	return "SELECT count(*) FROM sqlite_master WHERE type IN ('table','view') AND name = ?", []any{t.Name}
 }
+func (sqlite) CreateSchema(string) string { return "" }
 func (sqlite) ListTables(string, string) (string, []any) {
 	return "SELECT '', name FROM sqlite_master WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY 1", nil
 }

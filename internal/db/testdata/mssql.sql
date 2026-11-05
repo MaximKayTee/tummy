@@ -1,3 +1,6 @@
+-- create schema
+IF SCHEMA_ID(N'out') IS NULL EXEC('CREATE SCHEMA [out]')
+
 -- create
 CREATE TABLE [s].[_tummy_tmp_orders] ([id] bigint, [code] nvarchar(450), [note] nvarchar(max), [total] decimal(10,2), [rate] decimal(38,10), [ok] bit, [at] datetime2, [day] date, [meta] nvarchar(max), [blob] varbinary(max), [f] float)
 

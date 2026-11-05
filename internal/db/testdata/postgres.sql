@@ -1,3 +1,6 @@
+-- create schema
+CREATE SCHEMA IF NOT EXISTS "out"
+
 -- create
 CREATE TABLE "s"."_tummy_tmp_orders" ("id" bigint, "code" text, "note" text, "total" numeric, "rate" numeric, "ok" boolean, "at" timestamp, "day" date, "meta" jsonb, "blob" bytea, "f" double precision)
 
