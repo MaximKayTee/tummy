@@ -31,6 +31,11 @@ func serveCmd() *cobra.Command {
 			}
 			defer st.Close()
 			d := daemon.New(flagHome, st, logger)
+			if v := os.Getenv("TUMMY_TICK"); v != "" { // tests: a fast heartbeat
+				if t, err := time.ParseDuration(v); err == nil && t > 0 {
+					d.Tick = t
+				}
+			}
 			d.Connections = flagConnections
 			hup := make(chan os.Signal, 1)
 			signal.Notify(hup, syscall.SIGHUP)

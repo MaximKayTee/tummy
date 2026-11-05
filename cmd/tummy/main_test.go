@@ -174,3 +174,27 @@ func TestOneLine(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// A fresh machine: default paths under XDG, nothing created yet.
+func TestFreshMachineDefaults(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
+	for _, v := range []string{"TUMMY_HOME", "TUMMY_STATE", "TUMMY_CONNECTIONS"} {
+		t.Setenv(v, "")
+	}
+	for _, args := range [][]string{{"conns", "list"}, {"list"}, {"runs"}, {"status"}} {
+		if _, err := tummy(t, args...); err != nil {
+			var code exitCode
+			if !errors.As(err, &code) || code > 1 {
+				t.Fatalf("%v: %v", args, err)
+			}
+		}
+	}
+	if out, err := tummy(t, "--version"); err != nil || !strings.HasPrefix(out, "tummy ") {
+		t.Fatalf("--version: %v %q", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "config", "tummy")); err == nil {
+		t.Fatal("listing must not create the config dir")
+	}
+}
