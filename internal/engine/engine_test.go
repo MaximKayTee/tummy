@@ -768,3 +768,67 @@ func TestRunErrorNamesTheStream(t *testing.T) {
 		t.Fatalf("summary should carry the stream's error: %v", err)
 	}
 }
+
+func TestPlanSampleRollsBack(t *testing.T) {
+	f := setup(t)
+	r := f.replication("source = \"SRC\"\ntarget = \"TGT\"\nmode = \"incremental\"\nprimary_key = [\"id\"]\nupdate_key = \"updated_at\"\n[streams.orders]\n[streams.customers]\nmode = \"snapshot\"\n")
+	e := f.engine()
+	ctx := context.Background()
+	plan := func(sample bool) map[string]PlanRow {
+		t.Helper()
+		rows, err := e.Plan(ctx, r)
+		if sample {
+			rows, err = e.PlanSample(ctx, r)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		by := map[string]PlanRow{}
+		for _, p := range rows {
+			by[p.Stream] = p
+		}
+		return by
+	}
+	names := func(cols []PlanColumn) string {
+		var out []string
+		for _, c := range cols {
+			out = append(out, c.Name+":"+c.Target)
+		}
+		return strings.Join(out, " ")
+	}
+
+	by := plan(false)
+	if p := by["orders"]; p.Sample != nil || names(p.Columns) != "id:INTEGER customer:TEXT total:REAL updated_at:TEXT" {
+		t.Fatalf("plain plan: sample %+v columns %s", p.Sample, names(p.Columns))
+	}
+	by = plan(true)
+	if s := by["orders"].Sample; s == nil || s.Err != "" || s.Rows != 3 {
+		t.Fatalf("orders sample: %+v", s)
+	}
+	p := by["customers"]
+	if s := p.Sample; s == nil || s.Err != "" || s.Rows != 2 {
+		t.Fatalf("customers sample: %+v", s)
+	}
+	if last := p.Columns[len(p.Columns)-1]; last.Name != loadedAtColumn || last.Note == "" {
+		t.Fatalf("snapshot load time column: %+v", last)
+	}
+	if n := f.count("SELECT count(*) FROM sqlite_master"); n != 0 {
+		t.Fatalf("test load left %d objects in the target", n)
+	}
+
+	f.run(e, r, "orders")
+	f.exec(f.src, `ALTER TABLE orders ADD COLUMN note TEXT`)
+	by = plan(true)
+	var note string
+	for _, c := range by["orders"].Columns {
+		if c.Name == "note" {
+			note = c.Note
+		}
+	}
+	if !strings.Contains(note, "the run adds it") || by["orders"].Sample.Err != "" {
+		t.Fatalf("new source column: note %q sample %+v", note, by["orders"].Sample)
+	}
+	if n := f.count("SELECT count(*) FROM sqlite_master WHERE type = 'table'"); n != 1 {
+		t.Fatal("scratch table left behind")
+	}
+}

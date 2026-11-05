@@ -387,6 +387,28 @@ func TestDryRunPage(t *testing.T) {
 	if runs, _ := m.opts.State.RunsFor(context.Background(), "", "", 10); len(runs) != 0 {
 		t.Fatal("dry run wrote a run")
 	}
+	if strings.Contains(v, "rolled back") {
+		t.Fatalf("plan page sampled before t:\n%s", v)
+	}
+	mm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	m = mm.(Model)
+	found = false
+	for _, msg := range runBatch(t, cmd) {
+		if p, ok := msg.(planMsg); ok {
+			plan, found = p, true
+		}
+	}
+	if !found || !m.planSample || len(plan.Rows) == 0 || plan.Rows[0].Sample == nil {
+		t.Fatalf("t on the plan page should test load: found %v rows %+v", found, plan.Rows)
+	}
+	mm, _ = m.Update(plan)
+	m = mm.(Model)
+	if v = m.View(); !strings.Contains(v, "rolled back") || m.planning {
+		t.Fatalf("test load page:\n%s", v)
+	}
+	if runs, _ := m.opts.State.RunsFor(context.Background(), "", "", 10); len(runs) != 0 {
+		t.Fatal("test load wrote a run")
+	}
 	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	m = mm.(Model)
 	if m.view != viewList || m.planName != "" {

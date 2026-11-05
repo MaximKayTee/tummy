@@ -38,8 +38,9 @@ type planMsg struct {
 	Err         error
 }
 
-// planNow resolves the replication against its connections without writing.
-func (m Model) planNow(rep replication) tea.Cmd {
+// planNow resolves the replication against its connections without writing. sample
+// adds the test load: engine.SampleRows rows per stream, rolled back.
+func (m Model) planNow(rep replication, sample bool) tea.Cmd {
 	if rep.Err != "" {
 		return func() tea.Msg { return planMsg{Replication: rep.Name, Err: errors.New(rep.Err)} }
 	}
@@ -47,7 +48,11 @@ func (m Model) planNow(rep replication) tea.Cmd {
 		return func() tea.Msg { return planMsg{Replication: rep.Name, Err: errors.New(rep.ConnErr)} }
 	}
 	opts := m.opts
-	return tea.Batch(status("dry run: "+rep.Name, false), func() tea.Msg {
+	word := "dry run: "
+	if sample {
+		word = "test load: "
+	}
+	return tea.Batch(status(word+rep.Name, false), func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		r, err := config.LoadReplication(rep.Path)
@@ -59,7 +64,11 @@ func (m Model) planNow(rep replication) tea.Cmd {
 			return planMsg{Replication: rep.Name, Err: err}
 		}
 		e := &engine.Engine{Conns: conns, State: opts.State, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-		rows, err := e.Plan(ctx, r)
+		plan := e.Plan
+		if sample {
+			plan = e.PlanSample
+		}
+		rows, err := plan(ctx, r)
 		return planMsg{Replication: rep.Name, Rows: rows, Err: err}
 	})
 }

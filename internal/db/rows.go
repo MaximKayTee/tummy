@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -98,6 +99,7 @@ type Inserter struct {
 	// Label names the table in errors; defaults to the table.
 	Label   string
 	db      *DB
+	ex      execer
 	table   Table
 	cols    []Column
 	perStmt int
@@ -105,20 +107,35 @@ type Inserter struct {
 	rows    int
 	Total   int64
 	strip   bool
-	// Stripped counts the values a NUL byte was removed from (RejectsNUL targets).
+	// Stripped counts the values a NUL byte was removed from (RejectsNUL targets);
+	// Repaired the values whose invalid UTF-8 bytes became U+FFFD.
 	Stripped int64
+	Repaired int64
+}
+
+type execer interface {
+	ExecContext(ctx context.Context, q string, args ...any) (sql.Result, error)
 }
 
 func (d *DB) NewInserter(t Table, cols []Column) *Inserter {
 	per := d.Dialect.MaxParams() / max(len(cols), 1)
 	per = min(per, d.Dialect.MaxRows())
-	return &Inserter{Label: t.String(), db: d, table: t, cols: cols, perStmt: max(per, 1), strip: d.Dialect.RejectsNUL()}
+	return &Inserter{Label: t.String(), db: d, ex: d.DB, table: t, cols: cols, perStmt: max(per, 1), strip: d.Dialect.RejectsNUL()}
 }
 
 func (ins *Inserter) Add(ctx context.Context, row []any) error {
 	if ins.strip {
 		for i, v := range row {
-			if str, ok := v.(string); ok && strings.IndexByte(str, 0) >= 0 {
+			str, ok := v.(string)
+			if !ok {
+				continue
+			}
+			if !utf8.ValidString(str) { // bytes of a binary or non-Unicode column read as text
+				str = strings.ToValidUTF8(str, "\uFFFD")
+				row[i] = str
+				ins.Repaired++
+			}
+			if strings.IndexByte(str, 0) >= 0 {
 				row[i] = strings.ReplaceAll(str, "\x00", "")
 				ins.Stripped++
 			}
@@ -139,9 +156,12 @@ func (ins *Inserter) Flush(ctx context.Context) error {
 		return nil
 	}
 	d := ins.db
-	if _, err := d.ExecContext(ctx, InsertSQL(d.Dialect, ins.table, ins.cols, ins.rows), ins.buf...); err != nil {
-		if ctx.Err() != nil {
+	if _, err := ins.ex.ExecContext(ctx, InsertSQL(d.Dialect, ins.table, ins.cols, ins.rows), ins.buf...); err != nil {
+		switch {
+		case ctx.Err() != nil:
 			return fmt.Errorf("%s: insert into %s: %w", d.Name, ins.Label, err)
+		case ins.rows == 1:
+			return ins.rowErr(0, err)
 		}
 		if rerr := ins.rowByRow(ctx); rerr != nil {
 			return rerr
@@ -154,27 +174,79 @@ func (ins *Inserter) Flush(ctx context.Context) error {
 }
 
 func (ins *Inserter) rowByRow(ctx context.Context) error {
-	d := ins.db
 	n := len(ins.cols)
-	one := InsertSQL(d.Dialect, ins.table, ins.cols, 1)
+	one := InsertSQL(ins.db.Dialect, ins.table, ins.cols, 1)
 	for r := 0; r < ins.rows; r++ {
-		if _, err := d.ExecContext(ctx, one, ins.buf[r*n:(r+1)*n]...); err != nil {
-			where := fmt.Sprintf("row %d", ins.Total+int64(r)+1)
-			var pe *pgconn.PgError
-			if errors.As(err, &pe) {
-				if pe.ColumnName != "" {
-					where += ", column " + pe.ColumnName
-				} else if c, ok := ins.paramColumn(pe.Where); ok {
-					where += ", column " + c.Name
-					if c.Type != "" {
-						where += " (source type " + c.Type + ")"
-					}
-				}
-			}
-			return fmt.Errorf("%s: insert into %s: %s: %w", d.Name, ins.Label, where, err)
+		if _, err := ins.ex.ExecContext(ctx, one, ins.buf[r*n:(r+1)*n]...); err != nil {
+			return ins.rowErr(r, err)
 		}
 	}
 	return nil
+}
+
+// rowErr names buffered row r, and its column when the database says which, in the
+// error of a one-row insert.
+func (ins *Inserter) rowErr(r int, err error) error {
+	where := fmt.Sprintf("row %d", ins.Total+int64(r)+1)
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		if pe.ColumnName != "" {
+			where += ", column " + pe.ColumnName
+		} else if c, ok := ins.paramColumn(pe.Where); ok {
+			where += ", column " + c.Name
+			if c.Type != "" {
+				where += " (source type " + c.Type + ")"
+			}
+		}
+	}
+	return fmt.Errorf("%s: insert into %s: %s: %w", ins.db.Name, ins.Label, where, err)
+}
+
+// Scratch is a table that lives inside a transaction that is always rolled back, so
+// rows can be test-loaded with the database left as it was.
+type Scratch struct {
+	*Inserter
+	tx   *sql.Tx
+	drop string
+}
+
+// BeginScratch creates t as CreateTable would, schema included, in a new transaction.
+// Where DDL commits (mysql) t is instead a temporary table in the session's database,
+// dropped by Close. Rows go in one per statement: the first bad row fails on its own,
+// with no retry in a transaction the error has aborted.
+func (d *DB) BeginScratch(ctx context.Context, t Table, cols []Column, keys []string) (*Scratch, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", d.Name, err)
+	}
+	sc := &Scratch{tx: tx}
+	var stmts []string
+	if d.Dialect.TxDDL() {
+		if q := d.Dialect.CreateSchema(t.Schema); t.Schema != "" && q != "" {
+			stmts = append(stmts, q)
+		}
+		stmts = append(stmts, CreateTableSQL(d.Dialect, t, cols, keys))
+	} else {
+		t.Schema = ""
+		stmts = append(stmts, "CREATE TEMPORARY "+strings.TrimPrefix(CreateTableSQL(d.Dialect, t, cols, keys), "CREATE "))
+		sc.drop = "DROP TEMPORARY TABLE " + QuoteTable(d.Dialect, t)
+	}
+	for _, q := range stmts {
+		if err := d.ExecTx(ctx, tx, q); err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+	}
+	sc.Inserter = &Inserter{Label: t.String(), db: d, ex: tx, table: t, cols: cols, perStmt: 1, strip: d.Dialect.RejectsNUL()}
+	return sc, nil
+}
+
+// Close drops a temporary table and rolls the transaction back.
+func (sc *Scratch) Close() error {
+	if sc.drop != "" {
+		sc.tx.Exec(sc.drop)
+	}
+	return sc.tx.Rollback()
 }
 
 var bindParam = regexp.MustCompile(`parameter \$(\d+)`)

@@ -118,11 +118,12 @@ func first(ss []string) string {
 // basicsInto copies the basics form into d.
 func (w *repWizard) basicsInto(d *config.ReplicationDraft) {
 	f := w.basics
-	if f.get("source") != d.Source {
-		w.srcTables, w.srcErr, w.colsSeen = nil, "", nil // listed again for the new source
+	if f.get("source") != d.Source { // listed again for the new source
+		w.srcTables, w.srcErr, w.srcLoading, w.srcSeq, w.wantPick = nil, "", false, 0, false
+		w.colsSeen, w.colsAsked = nil, false
 	}
 	if f.get("target") != d.Target {
-		w.tgtTables = nil
+		w.tgtTables, w.tgtLoading, w.tgtSeq = nil, false, 0
 	}
 	d.Name, d.Source, d.Target = f.get("name"), f.get("source"), f.get("target")
 	d.Enabled = f.on("enabled")
@@ -214,13 +215,14 @@ func (w *repWizard) discoverCols() tea.Cmd {
 		return nil
 	}
 	w.colsAsked = true
+	source := w.draft.Source
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		out := map[string][]db.Column{}
 		d, err := db.Open(ctx, c.DB())
 		if err != nil {
-			return tableColsMsg{Cols: out}
+			return tableColsMsg{Source: source, Cols: out}
 		}
 		defer d.Close()
 		for _, t := range tables {
@@ -228,7 +230,7 @@ func (w *repWizard) discoverCols() tea.Cmd {
 				out[t] = cols
 			}
 		}
-		return tableColsMsg{Cols: out}
+		return tableColsMsg{Source: source, Cols: out}
 	}
 }
 

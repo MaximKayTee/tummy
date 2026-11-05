@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -25,6 +26,11 @@ func (w *repWizard) exploreUpdate(msg tea.Msg) (wizResult, tea.Cmd) {
 	}
 	if w.explore.draftSaved {
 		w.touched = true
+		if w.pick != nil { // saved from the table list's preview: the list learns the stream
+			for _, sd := range w.draft.Streams {
+				w.pick.lock(sd.Name, "in replication")
+			}
+		}
 	}
 	w.explore = nil
 	return wizContinue, nil
@@ -431,7 +437,7 @@ func (w *repWizard) keyPick(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			w.cur = len(w.draft.Streams) - 1
 		}
 		if w.entry == entryAdd {
-			if added == 0 {
+			if added == 0 && reflect.DeepEqual(w.draft, w.orig) {
 				return wizCancel, nil
 			}
 			w.lastPick, w.beforePick, w.pick = w.pick, &before, nil

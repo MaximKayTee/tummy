@@ -88,6 +88,7 @@ type Model struct {
 	runFrom    view      // where esc on a run goes
 	planName   string    // the run page shows a dry run of this replication
 	planning   bool      // the dry run is still resolving
+	planSample bool      // the dry run being resolved has the test load
 	planStart  time.Time // for the elapsed time while planning
 	vp         viewport.Model
 
@@ -247,6 +248,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.loadSnapshot()
 
+	case connOpenMsg:
+		if cw := m.connForm(); cw == nil || cw.probeSeq != msg.seq {
+			return m, closeOpen(msg) // the form that tested is gone
+		}
+
 	case connTestMsg:
 		delete(m.testing, msg.Name)
 		m.connResults[msg.Name] = msg
@@ -330,6 +336,18 @@ func (m Model) wizUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, cmd
+}
+
+// connForm is the connection editor on screen: the wizard itself, or one opened from the
+// replication wizard's source or target list.
+func (m Model) connForm() *connWizard {
+	switch w := m.wiz.(type) {
+	case *connWizard:
+		return w
+	case *repWizard:
+		return w.child
+	}
+	return nil
 }
 
 func wizDirty(w wizard) bool {
@@ -618,6 +636,13 @@ func (m Model) handleKeyInner(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.cursor[viewDetail], m.offset[viewDetail] = 0, 0
 			}
 			return m.startRun(rep, streams)
+		case key.Matches(msg, keys.Test) && m.planName != "" && !m.planning:
+			rep, ok := m.rep(m.planName)
+			if !ok {
+				return m, status(m.planName+".toml not found", true)
+			}
+			m.planning, m.planSample, m.planStart = true, true, time.Now()
+			return m, m.planNow(rep, true)
 		case key.Matches(msg, keys.Edit):
 			return m.editFromRun(m.run)
 		}
@@ -784,12 +809,12 @@ func (m Model) askCancel(rep replication) Model {
 // startPlan opens the run page at once, resolving shown until the plan arrives.
 func (m Model) startPlan(rep replication) (tea.Model, tea.Cmd) {
 	m.run, m.runFrom, m.planName = state.Run{Replication: rep.Name, Stream: "*"}, m.view, rep.Name
-	m.planning, m.planStart = true, time.Now()
+	m.planning, m.planSample, m.planStart = true, false, time.Now()
 	m.view = viewRun
 	m.vp.Width = max(m.width-4, 10)
 	m.vp.Height = max(m.bodyHeight()-2, 3)
 	m.vp.SetContent("")
-	return m, m.planNow(rep)
+	return m, m.planNow(rep, false)
 }
 
 // openPlan fills the run page with a dry run; r there runs it for real.

@@ -67,7 +67,7 @@ func pgSetup(t *testing.T) *pgFixture {
 	t.Cleanup(func() {
 		f.st.Close()
 		f.exec("DROP SCHEMA " + schema + " CASCADE")
-		f.exec("DROP SCHEMA " + schema + "_out CASCADE")
+		f.exec("DROP SCHEMA IF EXISTS " + schema + "_out CASCADE")
 		pg.Close()
 	})
 	return f
@@ -351,5 +351,82 @@ func TestPostgresDBHelpers(t *testing.T) {
 	vals, err := d.Distinct(ctx, q, "flag", 10, 0)
 	if err != nil || len(vals) != 3 || vals[0] != false || vals[1] != true || vals[2] != nil {
 		t.Fatalf("distinct: %#v %v", vals, err)
+	}
+}
+
+// A test load into postgres reports a value it cannot store, by row and column, and
+// leaves no schema or table behind.
+func TestPostgresPlanSample(t *testing.T) {
+	f := pgSetup(t)
+	lite, err := sql.Open("sqlite", filepath.Join(f.dir, "lite.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lite.Close()
+	for _, q := range []string{
+		`CREATE TABLE notes (id INTEGER, v TEXT)`,
+		`INSERT INTO notes VALUES (1, 'fine'), (2, CAST(X'346cf28e6c1c' AS BLOB))`,
+		`CREATE TABLE good (id INTEGER, v TEXT)`,
+		`INSERT INTO good VALUES (1, 'a'), (2, 'b')`,
+	} {
+		if _, err := lite.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := f.replication("source = \"LITE\"\ntarget = \"PG\"\nmode = \"full-refresh\"\n[streams.notes]\n[streams.good]\n")
+	e := f.engine()
+	rows, err := e.PlanSample(context.Background(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]PlanRow{}
+	for _, p := range rows {
+		by[p.Stream] = p
+	}
+	if s := by["notes"].Sample; s == nil || !strings.Contains(s.Err, "row 2, column v") || !strings.Contains(s.Err, "invalid byte sequence") || s.Rows != 1 {
+		t.Fatalf("notes sample: %+v", s)
+	}
+	if s := by["good"].Sample; s == nil || s.Err != "" || s.Rows != 2 {
+		t.Fatalf("good sample: %+v", s)
+	}
+	if n := f.count(fmt.Sprintf("SELECT count(*) FROM information_schema.schemata WHERE schema_name = '%s_out'", f.schema)); n != 0 {
+		t.Fatal("test load left the target schema behind")
+	}
+	if _, err := e.Run(context.Background(), r, []string{"good"}); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.count(fmt.Sprintf("SELECT count(*) FROM information_schema.tables WHERE table_schema = '%s_out'", f.schema)); n != 1 {
+		t.Fatalf("after the run: %d tables, want only good", n)
+	}
+}
+
+func TestPostgresTableStats(t *testing.T) {
+	f := pgSetup(t)
+	f.exec("ANALYZE " + f.schema + ".orders")
+	d, err := db.Open(context.Background(), f.conns.Conn["SRC"].DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	stats, err := d.TableStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]db.TableStat{}
+	for _, s := range stats {
+		by[s.Table.String()] = s
+	}
+	o := by[f.schema+".orders"]
+	if o.Rows != 3 || o.Bytes <= 0 || o.Exact {
+		t.Fatalf("orders: %+v", o)
+	}
+	if c, ok := by[f.schema+".customers"]; !ok || c.Rows != -1 { // never analyzed
+		t.Fatalf("customers: %+v %v", c, ok)
+	}
+	if _, ok := by[f.schema+".v_totals"]; ok {
+		t.Fatal("a view has stats")
+	}
+	if n, err := d.CountTable(context.Background(), db.Table{Schema: f.schema, Name: "customers"}); err != nil || n != 2 {
+		t.Fatalf("count: %d %v", n, err)
 	}
 }

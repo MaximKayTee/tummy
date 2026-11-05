@@ -83,6 +83,7 @@ type connProbeMsg struct {
 	Schemas   []string // databases with schemas
 	Err       error
 	Took      time.Duration
+	seq       int // the test that asked: an older test or another form's is dropped
 }
 
 // connOpenMsg is the first half of a database test: the connection is open, the listing
@@ -93,6 +94,18 @@ type connOpenMsg struct {
 	Took      time.Duration
 	Err       error
 	Databases bool // list databases, not tables
+	seq       int
+}
+
+// closeOpen closes the connection of a test result nobody takes, off the UI loop.
+func closeOpen(msg connOpenMsg) tea.Cmd {
+	if msg.DB == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg.DB.Close()
+		return nil
+	}
 }
 
 type connStep int
@@ -110,6 +123,7 @@ type connWizard struct {
 	form      *form
 	step      connStep
 	probing   bool
+	probeSeq  int           // the test results are taken from
 	connected time.Duration // set while listing, after the open step
 	scroll    int           // test screen: first table shown
 	pageSize  int           // test screen: tables per page, set by view
@@ -379,6 +393,9 @@ func (w *connWizard) conn() *config.Conn {
 func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 	switch msg := msg.(type) {
 	case connOpenMsg:
+		if msg.seq != w.probeSeq {
+			return wizContinue, closeOpen(msg)
+		}
 		if msg.Err != nil {
 			w.probing = false
 			w.probe = &connProbeMsg{Name: msg.Name, Err: msg.Err, Took: msg.Took}
@@ -387,6 +404,9 @@ func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 		w.connected = msg.Took
 		return wizContinue, listTablesCmd(msg)
 	case connProbeMsg:
+		if msg.seq != w.probeSeq {
+			return wizContinue, nil
+		}
 		w.probing = false
 		w.probe = &msg
 		if fl := w.form.field("schema"); fl != nil && len(msg.Schemas) > 0 {
@@ -460,23 +480,23 @@ func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 }
 
 func (w *connWizard) startProbe() tea.Cmd {
-	w.probing = true
+	w.probing, w.probeSeq = true, nextSeq()
 	w.probe = nil
 	w.connected = 0
 	w.scroll = 0
-	c := w.conn()
+	c, seq := w.conn(), w.probeSeq
 	if c.Type == "api" || c.Type == "sqlite" {
-		return func() tea.Msg { return probeConn(c) }
+		return func() tea.Msg { return probeConn(c, seq) }
 	}
-	return func() tea.Msg { return openConn(c) }
+	return func() tea.Msg { return openConn(c, seq) }
 }
 
 // probeConn reaches an API or opens a sqlite file and lists its tables, in one step.
-func probeConn(c *config.Conn) connProbeMsg {
+func probeConn(c *config.Conn, seq int) connProbeMsg {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	res, err := probe.Conn(ctx, c, probe.AllSchemas)
-	return connProbeMsg{Name: c.Name, Tables: res.Tables, Err: err, Took: res.Took}
+	return connProbeMsg{Name: c.Name, Tables: res.Tables, Err: err, Took: res.Took, seq: seq}
 }
 
 // noDatabase is true when the url names no database. Such a test lists the databases.
@@ -487,7 +507,7 @@ func noDatabase(c *config.Conn) bool {
 
 // openConn is the connect step of a database test. Postgres needs a database to log
 // into: without one the maintenance database stands in.
-func openConn(c *config.Conn) tea.Msg {
+func openConn(c *config.Conn, seq int) tea.Msg {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -498,7 +518,7 @@ func openConn(c *config.Conn) tea.Msg {
 		x.URL = p.String()
 	}
 	d, err := probe.Open(ctx, &x)
-	return connOpenMsg{Name: c.Name, DB: d, Took: time.Since(start), Err: err, Databases: noDatabase(c)}
+	return connOpenMsg{Name: c.Name, DB: d, Took: time.Since(start), Err: err, Databases: noDatabase(c), seq: seq}
 }
 
 // listTablesCmd is the listing step: every schema's tables, then the schema names.
@@ -508,7 +528,7 @@ func listTablesCmd(open connOpenMsg) tea.Cmd {
 		defer cancel()
 		defer open.DB.Close()
 		start := time.Now()
-		msg := connProbeMsg{Name: open.Name}
+		msg := connProbeMsg{Name: open.Name, seq: open.seq}
 		if open.Databases {
 			dbs, err := open.DB.ListDatabases(ctx)
 			if err != nil {

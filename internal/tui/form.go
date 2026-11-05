@@ -246,7 +246,10 @@ func (f *form) fieldChanged(key string) bool { return f.values()[key] != f.init[
 func (f *form) get(key string) string {
 	for _, fl := range f.fields {
 		if fl.Key == key {
-			if fl.Kind == kindText || fl.Kind == kindSecret {
+			switch fl.Kind {
+			case kindSecret:
+				return fl.input.Value() // spaces can be part of a password
+			case kindText:
 				return strings.TrimSpace(fl.input.Value())
 			}
 			return fl.Value
@@ -523,6 +526,9 @@ func (f *form) handle(msg tea.KeyMsg) (formResult, tea.Cmd) {
 		}
 		return formContinue, f.focus()
 	default:
+		if fl.Kind == kindSecret && msg.Paste { // a copied secret often ends in a line break
+			msg.Runes = []rune(strings.TrimRight(string(msg.Runes), "\r\n"))
+		}
 		var cmd tea.Cmd
 		fl.input, cmd = fl.input.Update(msg)
 		fl.err = ""

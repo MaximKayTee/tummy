@@ -383,8 +383,7 @@ func (e *Engine) runStream(ctx context.Context, r *config.Replication, tgt *db.D
 	defer src.close()
 
 	cols := src.cols
-	switch {
-	case len(cols) == 0: // API stream without records
+	if len(cols) == 0 { // API stream without records
 		if !exists || (s.Mode != "full-refresh" && s.Mode != "truncate") {
 			return
 		}
@@ -393,36 +392,18 @@ func (e *Engine) runStream(ctx context.Context, r *config.Replication, tgt *db.D
 			res.Err = err
 			return
 		}
-	case s.Mode == "snapshot":
-		cols = append(slices.Clone(cols), db.Column{Name: loadedAtColumn, Kind: db.Timestamp})
 	}
-	keys, err := columnNames(cols, s.PrimaryKey)
+	sh, err := shapeFor(s, cols)
 	if err != nil {
-		res.Err = fmt.Errorf("primary_key: %w", err)
+		res.Err = err
 		return
-	}
-	uk := ""
-	if s.UpdateKey != "" {
-		if k, err := columnNames(cols, []string{s.UpdateKey}); err == nil {
-			uk = k[0]
-		}
-	}
-
-	dedupe := len(keys) > 0
-	load := cols
-	if dedupe {
-		load = append(slices.Clone(cols), db.Column{Name: seqColumn, Kind: db.Int})
 	}
 	tmp := auxTable(target, "tmp", r.Name)
 	if err := tgt.DropTable(ctx, tmp); err != nil {
 		res.Err = err
 		return
 	}
-	sized := keys
-	if uk != "" {
-		sized = append(slices.Clone(keys), uk)
-	}
-	if err := tgt.CreateTable(ctx, tmp, load, sized); err != nil {
+	if err := tgt.CreateTable(ctx, tmp, sh.load, sh.sized); err != nil {
 		res.Err = err
 		return
 	}
@@ -432,11 +413,11 @@ func (e *Engine) runStream(ctx context.Context, r *config.Replication, tgt *db.D
 		}
 	}()
 
-	ins := tgt.NewInserter(tmp, load)
+	ins := tgt.NewInserter(tmp, sh.load)
 	ins.Label = res.Object
 	loadedAt := time.Now().UTC()
 	lastProgress := time.Now()
-	var seq int64
+	var n int64
 	e.phase(ctx, runID, s, res.Object, PhaseLoading, 0)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -451,14 +432,8 @@ func (e *Engine) runStream(ctx context.Context, r *config.Replication, tgt *db.D
 		if row == nil {
 			break
 		}
-		if s.Mode == "snapshot" {
-			row = append(row, loadedAt)
-		}
-		if dedupe {
-			seq++
-			row = append(row, seq)
-		}
-		if err := ins.Add(ctx, row); err != nil {
+		n++
+		if err := ins.Add(ctx, sh.extend(row, loadedAt, n)); err != nil {
 			res.Err = err
 			return
 		}
@@ -470,6 +445,9 @@ func (e *Engine) runStream(ctx context.Context, r *config.Replication, tgt *db.D
 	if ins.Stripped > 0 {
 		e.log().Warn("NUL bytes removed from text values: the target cannot store them", "stream", s.Name, "values", ins.Stripped)
 	}
+	if ins.Repaired > 0 {
+		e.log().Warn("invalid UTF-8 in text values replaced with U+FFFD: a binary or non-Unicode column read as text", "stream", s.Name, "values", ins.Repaired)
+	}
 	if err := ins.Flush(ctx); err != nil {
 		res.Err = err
 		return
@@ -477,14 +455,59 @@ func (e *Engine) runStream(ctx context.Context, r *config.Replication, tgt *db.D
 	res.Rows = ins.Total
 
 	e.phase(ctx, runID, s, res.Object, PhaseMerging, res.Rows)
+	dedupe := len(sh.keys) > 0
 	if dedupe {
-		if err := dedupeTable(ctx, tgt, tmp, keys, uk); err != nil {
+		if err := dedupeTable(ctx, tgt, tmp, sh.keys, sh.uk); err != nil {
 			res.Err = err
 			return
 		}
 	}
-	res.Err = e.finalize(ctx, tgt, s, r.Name, tmp, target, cols, keys, uk, exists, dedupe)
+	res.Err = e.finalize(ctx, tgt, s, r.Name, tmp, target, sh.cols, sh.keys, sh.uk, exists, dedupe)
 	return
+}
+
+// shape is a stream's temp table. cols are what finalize copies to the target: the
+// source columns, plus the load time for snapshots. load adds the dedupe sequence when
+// there are keys. sized columns get key-sized types.
+type shape struct {
+	cols, load []db.Column
+	keys       []string
+	uk         string
+	sized      []string
+	snapshot   bool
+}
+
+func shapeFor(s stream, cols []db.Column) (shape, error) {
+	snapshot := s.Mode == "snapshot"
+	if snapshot {
+		cols = append(slices.Clone(cols), db.Column{Name: loadedAtColumn, Kind: db.Timestamp})
+	}
+	keys, err := columnNames(cols, s.PrimaryKey)
+	if err != nil {
+		return shape{}, fmt.Errorf("primary_key: %w", err)
+	}
+	sh := shape{cols: cols, load: cols, keys: keys, sized: keys, snapshot: snapshot}
+	if s.UpdateKey != "" {
+		if k, err := columnNames(cols, []string{s.UpdateKey}); err == nil {
+			sh.uk = k[0]
+			sh.sized = append(slices.Clone(keys), sh.uk)
+		}
+	}
+	if len(keys) > 0 {
+		sh.load = append(slices.Clone(cols), db.Column{Name: seqColumn, Kind: db.Int})
+	}
+	return sh, nil
+}
+
+// extend adds the load time and the sequence number n of the row to a source row.
+func (sh shape) extend(row []any, loadedAt time.Time, n int64) []any {
+	if sh.snapshot {
+		row = append(row, loadedAt)
+	}
+	if len(sh.keys) > 0 {
+		row = append(row, n)
+	}
+	return row
 }
 
 // watchCancel returns a context that ends when State.Cancel is called for runID, with

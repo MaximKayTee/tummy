@@ -97,8 +97,8 @@ func (e *explorer) editStep(idx int) tea.Cmd {
 	}
 	e.stepEdit = idx
 	e.stepWait = idx
-	e.fetchSeq++
-	seq, q := e.fetchSeq, e.runQueryFor(e.fetchSpec(e.pipeline[:idx]))
+	e.prefixSeq = nextSeq() // its own sequence: a preview fetch in flight still lands
+	seq, q := e.prefixSeq, e.runQueryFor(e.fetchSpec(e.pipeline[:idx]))
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -108,7 +108,7 @@ func (e *explorer) editStep(idx int) tea.Cmd {
 }
 
 func (e *explorer) applyPrefix(msg prefixMsg) tea.Cmd {
-	if msg.idx != e.stepWait {
+	if msg.idx != e.stepWait || msg.seq != e.prefixSeq {
 		return nil // another edit since
 	}
 	e.stepWait = -1

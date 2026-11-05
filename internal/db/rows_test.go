@@ -123,3 +123,22 @@ func TestPrimaryKeySQL(t *testing.T) {
 		t.Errorf("mysql default schema: %s %v", q, args)
 	}
 }
+
+func TestSQLiteTableStats(t *testing.T) {
+	ctx := context.Background()
+	d, err := Open(ctx, Params{Name: "L", Type: "sqlite", Path: filepath.Join(t.TempDir(), "x.db"), Create: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if err := d.Exec(ctx, "CREATE TABLE a (x TEXT); CREATE INDEX a_x ON a (x); INSERT INTO a VALUES ('p'), ('q'); CREATE VIEW v AS SELECT * FROM a"); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := d.TableStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 || stats[0].Table.Name != "a" || stats[0].Rows != 2 || !stats[0].Exact || stats[0].Bytes < 8192 {
+		t.Fatalf("%+v", stats) // a table page and an index page
+	}
+}

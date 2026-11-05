@@ -72,6 +72,18 @@ func (p *picker) toggle(it string) {
 	p.order = append(p.order, it)
 }
 
+// lock lists an item as ticked and fixed, part of what the list opened with.
+func (p *picker) lock(it, note string) {
+	if !slices.Contains(p.items, it) {
+		p.items = append(p.items, it)
+	}
+	if !p.selected[it] {
+		p.selected[it] = true
+		p.order = append(p.order, it)
+	}
+	p.opened[it], p.locked[it], p.note[it] = true, true, note
+}
+
 // chosenInOrder returns ticked items in the order they were ticked.
 func (p *picker) chosenInOrder() []string {
 	var out []string

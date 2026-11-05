@@ -144,7 +144,7 @@ func DefaultPath() string {
 	return filepath.Join(base, "tummy", "state.db")
 }
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 const schema = `
 CREATE TABLE IF NOT EXISTS runs (
@@ -181,13 +181,26 @@ CREATE TABLE IF NOT EXISTS schedules (
   schedule TEXT NOT NULL,
   enabled INTEGER NOT NULL,
   next_run TEXT
+);
+CREATE TABLE IF NOT EXISTS table_stats (
+  id INTEGER PRIMARY KEY,
+  conn TEXT NOT NULL,
+  schema_name TEXT NOT NULL,
+  table_name TEXT NOT NULL,
+  refreshed TEXT NOT NULL,
+  full INTEGER NOT NULL,
+  rows INTEGER,
+  bytes INTEGER,
+  exact INTEGER NOT NULL
 );`
 
 const indexes = `
 CREATE INDEX IF NOT EXISTS runs_rep ON runs(replication, stream, id);
 CREATE INDEX IF NOT EXISTS runs_started ON runs(started);
 CREATE INDEX IF NOT EXISTS runs_running ON runs(replication) WHERE status = 'running';
-CREATE INDEX IF NOT EXISTS requests_pending ON requests(id) WHERE taken IS NULL;`
+CREATE INDEX IF NOT EXISTS requests_pending ON requests(id) WHERE taken IS NULL;
+CREATE INDEX IF NOT EXISTS table_stats_conn ON table_stats(conn, schema_name, table_name, refreshed);
+CREATE INDEX IF NOT EXISTS table_stats_full ON table_stats(full, conn, refreshed);`
 
 // Open opens or creates the database. A new file is 0600 in a 0700 directory.
 func Open(path string) (*Store, error) {

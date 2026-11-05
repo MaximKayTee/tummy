@@ -38,6 +38,7 @@ type discoverMsg struct {
 	For    string
 	Tables []string
 	Err    error
+	seq    int // the request: a list asked for again since is dropped
 }
 
 // columnsMsg carries a table's columns for the stream editor.
@@ -51,7 +52,8 @@ type columnsMsg struct {
 
 // tableColsMsg carries the columns of the draft's tables, for the defaults' key lists.
 type tableColsMsg struct {
-	Cols map[string][]db.Column
+	Source string
+	Cols   map[string][]db.Column
 }
 
 // sampleMsg carries the columns of an API stream's first page.
@@ -62,19 +64,19 @@ type sampleMsg struct {
 }
 
 // discoverTables lists every table of every schema of a connection.
-func discoverTables(c *config.Conn, role string) tea.Cmd {
+func discoverTables(c *config.Conn, role string, seq int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		if path := missingFile(c); path != "" { // opening would create it
 			if role == "target" {
-				return discoverMsg{Conn: c.Name, For: role, Tables: []string{}}
+				return discoverMsg{Conn: c.Name, For: role, Tables: []string{}, seq: seq}
 			}
-			return discoverMsg{Conn: c.Name, For: role, Err: fmt.Errorf("conn %s: no such file: %s", c.Name, path)}
+			return discoverMsg{Conn: c.Name, For: role, Err: fmt.Errorf("conn %s: no such file: %s", c.Name, path), seq: seq}
 		}
 		d, err := db.Open(ctx, c.DB())
 		if err != nil {
-			return discoverMsg{Conn: c.Name, For: role, Err: err}
+			return discoverMsg{Conn: c.Name, For: role, Err: err, seq: seq}
 		}
 		defer d.Close()
 		all, err := d.ListAllTables(ctx)
@@ -82,7 +84,7 @@ func discoverTables(c *config.Conn, role string) tea.Cmd {
 		for _, t := range all {
 			tables = append(tables, t.String())
 		}
-		return discoverMsg{Conn: c.Name, For: role, Tables: tables, Err: err}
+		return discoverMsg{Conn: c.Name, For: role, Tables: tables, Err: err, seq: seq}
 	}
 }
 
@@ -129,9 +131,11 @@ type repWizard struct {
 	srcTables  []string
 	srcErr     string
 	srcLoading bool
+	srcSeq     int // the source list being read
 	wantPick   bool
 	tgtTables  []string
 	tgtLoading bool
+	tgtSeq     int
 	colsFor    string // stream whose columns are being read
 	colsErr    string
 	colsSeen   map[string][]db.Column // columns of source tables read so far
@@ -390,43 +394,72 @@ func (w *repWizard) discover(role, name string) tea.Cmd {
 		}
 		return nil
 	}
+	seq := nextSeq()
 	if role == "source" {
-		w.srcLoading, w.srcErr = true, ""
+		w.srcLoading, w.srcErr, w.srcSeq = true, "", seq
 	} else {
-		w.tgtLoading = true
+		w.tgtLoading, w.tgtSeq = true, seq
 	}
-	return discoverTables(c, role)
+	return discoverTables(c, role, seq)
 }
 
+// update takes the wizard's own results first, so a connection editor or explorer open
+// meanwhile does not swallow them; the rest goes to whichever is open.
 func (w *repWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
+	switch msg := msg.(type) {
+	case discoverMsg:
+		if msg.For != "" { // an explorer's lists have no role
+			return w.listed(msg)
+		}
+	case columnsMsg, tableColsMsg, sampleMsg:
+		return w.own(msg)
+	}
 	if w.child != nil {
 		return w.childUpdate(msg)
 	}
 	if w.explore != nil {
 		return w.exploreUpdate(msg)
 	}
-	switch msg := msg.(type) {
-	case discoverMsg:
-		if msg.For == "target" {
-			w.tgtLoading = false
-			if msg.Err == nil {
-				w.tgtTables = msg.Tables
-				w.refreshLists()
-			}
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		return w.key(msg)
+	}
+	return wizContinue, nil
+}
+
+// listed takes a table list of the source or target, when it is the one asked for last
+// and the draft still names that connection.
+func (w *repWizard) listed(msg discoverMsg) (wizResult, tea.Cmd) {
+	if msg.For == "target" {
+		if msg.seq != w.tgtSeq || msg.Conn != w.draft.Target {
 			return wizContinue, nil
 		}
-		w.srcLoading = false
-		if msg.Err != nil {
-			w.srcErr, w.wantPick = txt.FirstLine(msg.Err.Error()), false
-			return wizContinue, nil
-		}
-		w.srcTables = msg.Tables
-		w.refreshLists()
-		if w.wantPick {
-			w.wantPick = false
-			w.openPicker()
+		w.tgtLoading = false
+		if msg.Err == nil {
+			w.tgtTables = msg.Tables
+			w.refreshLists()
 		}
 		return wizContinue, nil
+	}
+	if msg.seq != w.srcSeq || msg.Conn != w.draft.Source {
+		return wizContinue, nil
+	}
+	w.srcLoading = false
+	if msg.Err != nil {
+		w.srcErr, w.wantPick = txt.FirstLine(msg.Err.Error()), false
+		return wizContinue, nil
+	}
+	w.srcTables = msg.Tables
+	w.refreshLists()
+	if w.wantPick {
+		w.wantPick = false
+		w.openPicker()
+	}
+	return wizContinue, nil
+}
+
+// own takes the column and sample results of the stream editor and the defaults.
+func (w *repWizard) own(msg tea.Msg) (wizResult, tea.Cmd) {
+	switch msg := msg.(type) {
 	case columnsMsg:
 		if w.colsFor == "" || msg.Stream != w.colsFor || w.editing < 0 || w.editing >= len(w.draft.Streams) {
 			return wizContinue, nil
@@ -442,6 +475,9 @@ func (w *repWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 		w.stream = w.streamFormKinds(sd, msg.Cols, msg.Kinds)
 		return wizContinue, w.stream.focus()
 	case tableColsMsg:
+		if msg.Source != w.draft.Source {
+			return wizContinue, nil // read for a source the draft no longer has
+		}
 		if w.colsSeen == nil {
 			w.colsSeen = map[string][]db.Column{}
 		}
@@ -472,8 +508,6 @@ func (w *repWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 			w.stream.focused = fl
 		}
 		return wizContinue, w.stream.focus()
-	case tea.KeyMsg:
-		return w.key(msg)
 	}
 	return wizContinue, nil
 }

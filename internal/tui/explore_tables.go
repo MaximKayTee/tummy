@@ -11,23 +11,24 @@ import (
 	"tummy/internal/txt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"tummy/internal/config"
 	"tummy/internal/db"
 )
 
 func (e *explorer) discover() tea.Cmd {
-	e.loading = true
-	h, name := e.h, e.conn.Name
+	e.loading, e.listSeq = true, nextSeq()
+	h, name, seq := e.h, e.conn.Name, e.listSeq
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		d, err := h.get(ctx)
 		if err != nil {
-			return discoverMsg{Conn: name, Err: err}
+			return discoverMsg{Conn: name, Err: err, seq: seq}
 		}
 		tables, err := allTables(ctx, d)
-		return discoverMsg{Conn: name, Tables: tables, Err: err}
+		return discoverMsg{Conn: name, Tables: tables, Err: err, seq: seq}
 	}
 }
 
@@ -51,7 +52,7 @@ func listSchemas(ctx context.Context, d *db.DB) ([]string, error) { return d.Lis
 func (e *explorer) visibleTables() []string {
 	f := strings.ToLower(e.filter.Value())
 	if f == "" {
-		return e.tables
+		return e.sortTables(e.tables)
 	}
 	var out []string
 	for _, t := range e.tables {
@@ -59,7 +60,7 @@ func (e *explorer) visibleTables() []string {
 			out = append(out, t)
 		}
 	}
-	return out
+	return e.sortTables(out)
 }
 
 func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
@@ -97,6 +98,17 @@ func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		e.cur = max(len(vis)-1, 0)
 	case "R":
 		return wizContinue, e.discover()
+	case "s":
+		if e.statsBusy == "" && e.opts.State != nil {
+			return wizContinue, e.refreshStats()
+		}
+	case "c":
+		if e.statsBusy == "" && e.opts.State != nil && e.cur < len(vis) {
+			return wizContinue, e.countTable(vis[e.cur])
+		}
+	case "o":
+		e.sortBy = (e.sortBy + 1) % 3
+		e.cur, e.offset = 0, 0
 	case "S":
 		e.resetPreview()
 		e.table, e.spec, e.streamName = "", config.Stream{}, ""
@@ -175,7 +187,16 @@ func (e *explorer) tablesView(width, height int) []string {
 	if e.filtering || e.filter.Value() != "" {
 		out = append(out, " "+e.filter.View())
 	}
-	out = append(out, "")
+	switch {
+	case e.statsBusy != "":
+		out = append(out, "  "+sWarn.Render("◐ "+txt.Clean(e.statsBusy)))
+	case e.statsNote != "" && e.statsErr:
+		out = append(out, "  "+sErr.Render(ansi.Truncate(glyphErr+" "+txt.Clean(e.statsNote), max(width-2, 10), "…")))
+	case e.statsNote != "":
+		out = append(out, "  "+sDim.Render(txt.Clean(e.statsNote)))
+	default:
+		out = append(out, "")
+	}
 	switch {
 	case e.loading:
 		return append(out, "  "+sWarn.Render("◐ tables"))
@@ -185,6 +206,12 @@ func (e *explorer) tablesView(width, height int) []string {
 	vis := e.visibleTables()
 	if len(vis) == 0 {
 		return append(out, "  "+sDim.Render("none"))
+	}
+	withStats := len(e.stats) > 0 && width >= statsWidth+24
+	nameW := width
+	if withStats {
+		nameW = width - statsWidth - 2
+		out = append(out, sDim.Render(pad("  TABLE", nameW, false)+"  "+statsHeader()))
 	}
 	rows := max(height-len(out), 1)
 	e.tableRows = rows
@@ -196,6 +223,10 @@ func (e *explorer) tablesView(width, height int) []string {
 	}
 	for i := e.offset; i < min(e.offset+rows, len(vis)); i++ {
 		line := pad("  "+txt.Clean(vis[i]), width, false)
+		if withStats {
+			s, ok := e.stats[vis[i]]
+			line = pad("  "+txt.Clean(vis[i]), nameW, false) + "  " + statsColumns(s, ok)
+		}
 		if i == e.cur {
 			line = selectedLine(line, width)
 		}

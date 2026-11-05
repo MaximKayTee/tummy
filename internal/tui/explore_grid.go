@@ -109,7 +109,7 @@ func (q runQuery) compile(ctx context.Context, d *db.DB) (string, []any, [][]str
 func (e *explorer) fetch() tea.Cmd {
 	e.fetching = true
 	e.fetchErr = ""
-	e.fetchSeq++
+	e.fetchSeq = nextSeq()
 	if e.limit == 0 {
 		e.limit = 1
 	}
@@ -258,7 +258,7 @@ func (e *explorer) showCmd() tea.Cmd {
 	if e.isAPI || e.readOnly || len(e.cols) == 0 || e.dl == nil {
 		return nil
 	}
-	e.shownSeq++
+	e.shownSeq = nextSeq()
 	seq := e.shownSeq
 	spec := e.fetchSpec(e.pipeline)
 	if err := e.applyEdits(&spec, e.tickedCols(), false); err != nil {

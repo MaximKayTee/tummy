@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"tummy/internal/txt"
 
@@ -15,6 +16,7 @@ import (
 
 	"tummy/internal/config"
 	"tummy/internal/db"
+	"tummy/internal/state"
 	"tummy/internal/steps"
 )
 
@@ -60,11 +62,18 @@ type explorer struct {
 	// tables
 	tables      []string
 	loading     bool
+	listSeq     int // the table list being read
 	loadErr     string
 	cur, offset int
 	filter      textinput.Model
 	filtering   bool
-	tableRows   int                    // table list: rows per screen, set by view
+	tableRows   int                        // table list: rows per screen, set by view
+	stats       map[string]state.TableStat // stored row counts and sizes, by table
+	statsSeq    int
+	statsBusy   string // what the refresh or count is doing; "" when idle
+	statsNote   string
+	statsErr    bool
+	sortBy      statsSort
 	wildcard    *config.ResolvedStream // tables matching it open with its where, select and steps
 
 	// what is being previewed
@@ -135,20 +144,27 @@ type explorer struct {
 	done     statusMsg
 
 	// transformation steps, database sources only
-	pipeline []steps.Step
-	stepCols [][]string // columns each step sees, from the last compile
-	stepCur  int
-	focus    gridFocus
-	compiled string
-	stepEd   *stepEditor
-	stepEdit int // index being edited, -1 for new
-	stepWait int // step whose prefix preview is loading, -1 for none
-	panelOff int // first line of the steps panel shown
-	panelCur int // step the panel last scrolled to
+	pipeline  []steps.Step
+	stepCols  [][]string // columns each step sees, from the last compile
+	stepCur   int
+	focus     gridFocus
+	compiled  string
+	stepEd    *stepEditor
+	stepEdit  int // index being edited, -1 for new
+	stepWait  int // step whose prefix preview is loading, -1 for none
+	prefixSeq int
+	panelOff  int // first line of the steps panel shown
+	panelCur  int // step the panel last scrolled to
 
 	palette    *picker
 	paletteCmd map[string]string
 }
+
+// asyncSeq numbers the requests of every screen in the process: a result matches only
+// the request that asked for it, never one of a screen opened since.
+var asyncSeq atomic.Int64
+
+func nextSeq() int { return int(asyncSeq.Add(1)) }
 
 // watermarkInfo is the update-key bound of an incremental stream, read from its target.
 type watermarkInfo struct {
@@ -335,7 +351,7 @@ func (e *explorer) footer() (string, string) {
 		if e.filtering {
 			return helpLine("type", "filter", "enter", "done"), helpLine("esc", "done")
 		}
-		pairs = []string{"enter", "preview", "S", "sql", "/", "filter", "pgup/pgdn", "page", "R", "refresh"}
+		pairs = []string{"enter", "preview", "s", "sizes", "c", "count", "o", "sort: " + e.sortBy.String(), "S", "sql", "/", "filter", "pgup/pgdn", "page", "R", "refresh"}
 	case pageEndpoint:
 		pairs = append(e.endpoint.hints(), "ctrl+s", "fetch")
 	case pagePreview:
@@ -456,7 +472,9 @@ func (e *explorer) keyHelp() (string, [][2]string) {
 	switch e.page {
 	case pageTables:
 		return "tables", [][2]string{
-			{"enter", "preview"}, {"S", "sql query"}, {"/", "filter"}, {"R", "refresh"}, {"esc", "back"},
+			{"enter", "preview"}, {"s", "row counts and sizes of every table from the catalog, kept as history"},
+			{"c", "exact COUNT(*) of the table"}, {"o", "sort by name, rows, size"},
+			{"S", "sql query"}, {"/", "filter"}, {"R", "refresh the table list"}, {"esc", "back"},
 		}
 	case pageEndpoint:
 		return "endpoint", [][2]string{{"enter", "next field"}, {"ctrl+s", "fetch"}, {"esc", "back"}}
@@ -507,7 +525,7 @@ func (e *explorer) start() tea.Cmd {
 		return e.endpoint.focus()
 	}
 	if len(e.tables) > 0 {
-		return nil
+		return e.loadStats()
 	}
 	return e.discover()
 }
@@ -524,13 +542,19 @@ func (e *explorer) update(msg tea.Msg) (wizResult, tea.Cmd) {
 func (e *explorer) dispatch(msg tea.Msg) (wizResult, tea.Cmd) {
 	switch msg := msg.(type) {
 	case discoverMsg:
+		if !e.loading || msg.seq != e.listSeq || msg.Conn != e.conn.Name {
+			return wizContinue, nil // another screen's list, or one asked again since
+		}
 		e.loading = false
 		e.loadErr = ""
 		if msg.Err != nil {
 			e.loadErr = msg.Err.Error()
-		} else {
-			e.tables = msg.Tables
+			return wizContinue, nil
 		}
+		e.tables = msg.Tables
+		return wizContinue, e.loadStats()
+	case statsMsg:
+		e.applyStats(msg)
 		return wizContinue, nil
 	case previewMsg:
 		return wizContinue, e.applyPreview(msg)

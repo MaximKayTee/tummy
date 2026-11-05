@@ -124,7 +124,10 @@ func TestTextUDTs(t *testing.T) {
 	if err := src.Exec(ctx, "CREATE TABLE sites (id INTEGER, shape GEOGRAPHY, name TEXT); INSERT INTO sites VALUES (1, 'point (1 2)', 'a'), (2, NULL, 'b')"); err != nil {
 		t.Fatal(err)
 	}
-	q := textUDTs(ctx, src, `SELECT * FROM "sites" WHERE "id" >= ?`, []any{1})
+	q, conv := textUDTs(ctx, src, `SELECT * FROM "sites" WHERE "id" >= ?`, []any{1})
+	if len(conv) != 1 || conv["shape"] != "GEOGRAPHY" {
+		t.Fatalf("converted: %v", conv)
+	}
 	if want := `SELECT _u."id", upper(_u."shape") AS "shape", _u."name" FROM (SELECT * FROM "sites" WHERE "id" >= ?) AS _u`; q != want {
 		t.Fatalf("got  %s\nwant %s", q, want)
 	}
@@ -147,10 +150,10 @@ func TestTextUDTs(t *testing.T) {
 	if strings.Join(got, ";") != "[1 POINT (1 2) a];[2 <nil> b]" || rd.Columns[1].Name != "shape" {
 		t.Fatalf("rows %q cols %v", got, rd.Columns)
 	}
-	if q := textUDTs(ctx, src, `SELECT "id", "name" FROM "sites"`, nil); q != `SELECT "id", "name" FROM "sites"` {
+	if q, _ := textUDTs(ctx, src, `SELECT "id", "name" FROM "sites"`, nil); q != `SELECT "id", "name" FROM "sites"` {
 		t.Fatalf("no udt column, query changed: %s", q)
 	}
-	if q := textUDTs(ctx, src, `SELECT nope FROM "sites"`, nil); q != `SELECT nope FROM "sites"` {
+	if q, _ := textUDTs(ctx, src, `SELECT nope FROM "sites"`, nil); q != `SELECT nope FROM "sites"` {
 		t.Fatalf("failed probe, query changed: %s", q)
 	}
 }

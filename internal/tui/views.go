@@ -305,7 +305,7 @@ func (m Model) shortHelp() string {
 			return helpLine("esc", "back")
 		}
 		if m.planName != "" {
-			return helpLine("r", "run", "↑/↓ pgup/pgdn", "scroll")
+			return helpLine("r", "run", "t", fmt.Sprintf("test load %d rows", engine.SampleRows), "↑/↓ pgup/pgdn", "scroll")
 		}
 		return helpLine("r", "run again", "E", "edit", "↑/↓ pgup/pgdn", "scroll")
 	case viewConns:
@@ -374,7 +374,7 @@ func (m Model) helpPages() []helpPage {
 	case viewList:
 		section("replications", [][2]string{
 			{"enter", "streams of the replication"}, {"n", "new replication"}, {"E", "edit"}, {"e", "on/off for the daemon"},
-			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"t", "dry run: target table, action and source query per stream, nothing written"}, {"x", "cancel a running run (y/n)"}, {"H", "run history"}, {"c", "connections"},
+			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"t", "dry run: target table, action, source query and columns per stream, nothing written"}, {"x", "cancel a running run (y/n)"}, {"H", "run history"}, {"c", "connections"},
 		})
 	case viewDetail:
 		section("streams", [][2]string{
@@ -385,6 +385,10 @@ func (m Model) helpPages() []helpPage {
 	case viewHistory:
 		section("history", [][2]string{{"enter", "run details"}, {"/", "filter"}})
 	case viewRun:
+		if m.planName != "" {
+			section("dry run", [][2]string{{"r", "run it"}, {"t", fmt.Sprintf("test load: the first %d rows per stream into a copy of the run's temp table, rolled back", engine.SampleRows)}, {"↑/↓ pgup/pgdn", "scroll"}})
+			break
+		}
 		section("run", [][2]string{{"r", "run again"}, {"E", "edit the stream, else the connection in the error"}, {"↑/↓ pgup/pgdn", "scroll"}})
 	case viewConns:
 		section("connections", [][2]string{
@@ -827,6 +831,7 @@ func planText(rows []engine.PlanRow, width int) string {
 	var b strings.Builder
 	counts := map[string]int{}
 	var order []string
+	sampled, failed := 0, 0
 	for _, p := range rows {
 		a := p.Action
 		if p.Err != "" {
@@ -836,10 +841,19 @@ func planText(rows []engine.PlanRow, width int) string {
 			order = append(order, a)
 		}
 		counts[a]++
+		if p.Sample != nil {
+			sampled++
+			if p.Sample.Err != "" {
+				failed++
+			}
+		}
 	}
 	var parts []string
 	for _, a := range order {
 		parts = append(parts, fmt.Sprintf("%d %s", counts[a], a))
+	}
+	if sampled > 0 {
+		parts = append(parts, fmt.Sprintf("test load %d/%d ok", sampled-failed, sampled))
 	}
 	b.WriteString(sHeader.Render(plural(len(rows), "stream")) + sDim.Render("   "+strings.Join(parts, "   ")) + "\n\n")
 	for i, p := range rows {
@@ -862,11 +876,58 @@ func planText(rows []engine.PlanRow, width int) string {
 		for _, l := range strings.Split(strings.TrimSpace(p.SQL), "\n") {
 			b.WriteString("    " + sText.Render(ansi.Truncate(txt.Clean(l), max(width-4, 10), "…")) + "\n")
 		}
+		planColumnsText(&b, p.Columns, width)
+		planSampleText(&b, p.Sample, width)
 	}
 	if len(rows) == 0 {
 		b.WriteString(sDim.Render("  no streams"))
 	}
 	return b.String()
+}
+
+// planColumnsText lists a stream's columns: name, source type, target type, note.
+func planColumnsText(b *strings.Builder, cols []engine.PlanColumn, width int) {
+	if len(cols) == 0 {
+		return
+	}
+	wn, ws, wt := 0, 0, 0
+	for _, c := range cols {
+		wn = max(wn, ansi.StringWidth(txt.Clean(c.Name)))
+		ws = max(ws, ansi.StringWidth(txt.Clean(orDash(c.Source))))
+		wt = max(wt, ansi.StringWidth(c.Target))
+	}
+	wn, ws, wt = min(wn, 32), min(ws, 20), min(wt, 24)
+	b.WriteString("\n")
+	for _, c := range cols {
+		l := "    " + sText.Render(pad(txt.Clean(c.Name), wn, false)) + "  " + sDim.Render(pad(txt.Clean(orDash(c.Source)), ws, false)) +
+			sDim.Render("  →  ")
+		if c.Note == "" {
+			l += sText.Render(c.Target)
+		} else {
+			l += sText.Render(pad(c.Target, wt, false)) + "   " + sWarn.Render(c.Note)
+		}
+		b.WriteString(ansi.Truncate(l, width, "…") + "\n")
+	}
+}
+
+// planSampleText reports a stream's test load.
+func planSampleText(b *strings.Builder, s *engine.PlanSample, width int) {
+	if s == nil {
+		return
+	}
+	b.WriteString("\n")
+	label := "    " + sDim.Render("test load  ")
+	if s.Err != "" {
+		msg := txt.Clean(strings.Join(strings.Fields(s.Err), " "))
+		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, label, sErr.Width(max(width-15, 20)).Render(glyphErr+" "+msg)) + "\n")
+		return
+	}
+	l := label + sOK.Render(plural(int(s.Rows), "row")+" loaded") +
+		sDim.Render("   read "+txt.Dur(s.Read)+"   load "+txt.Dur(s.Load)+"   rolled back")
+	b.WriteString(ansi.Truncate(l, width, "…") + "\n")
+	if s.Stripped > 0 {
+		b.WriteString("    " + sWarn.Render(fmt.Sprintf("           NUL bytes removed from %d values", s.Stripped)) + "\n")
+	}
 }
 
 func runText(r state.Run, width int) string {
@@ -904,7 +965,11 @@ func runText(r state.Run, width int) string {
 
 func (m Model) runView() []string {
 	if m.planning {
-		return []string{"", "  " + sWarn.Render(m.spin.View()+" resolving streams") + sDim.Render("  "+txt.Dur(time.Since(m.planStart).Round(time.Second)))}
+		word := " resolving streams"
+		if m.planSample {
+			word = fmt.Sprintf(" test loading %d rows per stream, rolled back", engine.SampleRows)
+		}
+		return []string{"", "  " + sWarn.Render(m.spin.View()+word) + sDim.Render("  "+txt.Dur(time.Since(m.planStart).Round(time.Second)))}
 	}
 	m.vp.Height = max(m.bodyHeight()-1, 3)
 	return append([]string{""}, strings.Split(m.vp.View(), "\n")...)
@@ -917,9 +982,13 @@ func (m Model) connsView() []string {
 	if len(conns) == 0 {
 		return []string{"", sDim.Render("  none")}
 	}
-	cols := []column{{Title: "NAME"}, {Title: "TYPE", Width: 12}, {Title: "URL"}, {Title: "TEST"}}
+	cols := []column{{Title: "NAME"}, {Title: "TYPE", Width: 12}, {Title: "URL"}, {Title: "SIZE", Right: true}, {Title: "TEST"}}
 	var rows [][]string
 	for _, c := range conns {
+		size := ""
+		if cs, ok := m.snap.ConnStats[c.Name]; ok {
+			size = sizeText(cs.Bytes) + sDim.Render("  "+ago(cs.Refreshed))
+		}
 		test := ""
 		switch {
 		case m.testing[c.Name]:
@@ -939,7 +1008,7 @@ func (m Model) connsView() []string {
 		if c.ReadOnly {
 			typ += " ro"
 		}
-		rows = append(rows, []string{txt.Clean(c.Name), sDim.Render(txt.Clean(typ)), sDim.Render(txt.Clean(c.Target)), test})
+		rows = append(rows, []string{txt.Clean(c.Name), sDim.Render(txt.Clean(typ)), sDim.Render(txt.Clean(c.Target)), size, test})
 	}
 	out := table(m.width, cols, rows, m.cursor[viewConns])
 	if cur, ok := at(conns, m.cursor[viewConns]); ok && !m.testing[cur.Name] {

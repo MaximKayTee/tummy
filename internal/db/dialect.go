@@ -24,6 +24,11 @@ type Dialect interface {
 	// BinaryUDTs maps the column types the driver returns in the engine's own binary
 	// serialisation to a SELECT expression (%s = the column) that returns them as text.
 	BinaryUDTs() map[string]string
+	// TxDDL: CREATE TABLE and CREATE SCHEMA roll back with their transaction.
+	TxDDL() bool
+	// TableStats lists schema, table, rows and bytes of every table from the catalog;
+	// "" when the engine keeps no row statistics.
+	TableStats() string
 	HasSchemas() bool
 	KindOf(typeName string) Kind
 	// TypeName is the column type for CREATE TABLE and ALTER TABLE ADD. Keys get index-sized types.
@@ -135,9 +140,18 @@ func (postgres) Placeholder(i int) string      { return "$" + strconv.Itoa(i) }
 func (postgres) MaxParams() int                { return 65000 }
 func (postgres) RejectsNUL() bool              { return true }
 func (postgres) BinaryUDTs() map[string]string { return nil }
-func (postgres) MaxRows() int                  { return 5000 }
-func (postgres) HasSchemas() bool              { return true }
-func (postgres) KindOf(n string) Kind          { return kindFromTypeName(n) }
+func (postgres) TxDDL() bool                   { return true }
+
+// reltuples is an estimate kept by ANALYZE and autovacuum; -1 before the first.
+func (postgres) TableStats() string {
+	return `SELECT n.nspname, c.relname, c.reltuples::bigint, pg_total_relation_size(c.oid)
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r', 'p', 'm') AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  AND n.nspname NOT LIKE 'pg\_toast%' AND n.nspname NOT LIKE 'pg\_temp%'`
+}
+func (postgres) MaxRows() int         { return 5000 }
+func (postgres) HasSchemas() bool     { return true }
+func (postgres) KindOf(n string) Kind { return kindFromTypeName(n) }
 func (postgres) TypeName(c Column, _ bool) string {
 	switch c.Kind {
 	case Int:
@@ -206,9 +220,16 @@ func (mysql) Placeholder(int) string        { return "?" }
 func (mysql) MaxParams() int                { return 60000 }
 func (mysql) RejectsNUL() bool              { return false }
 func (mysql) BinaryUDTs() map[string]string { return nil }
-func (mysql) MaxRows() int                  { return 1000 } // max_allowed_packet
-func (mysql) HasSchemas() bool              { return true }
-func (mysql) KindOf(n string) Kind          { return kindFromTypeName(n) }
+func (mysql) TxDDL() bool                   { return false }
+
+// table_rows is InnoDB's estimate.
+func (mysql) TableStats() string {
+	return `SELECT table_schema, table_name, table_rows, data_length + index_length FROM information_schema.tables
+WHERE table_type = 'BASE TABLE' AND table_schema NOT IN ('mysql', 'information_schema', 'performance_schema', 'sys')`
+}
+func (mysql) MaxRows() int         { return 1000 } // max_allowed_packet
+func (mysql) HasSchemas() bool     { return true }
+func (mysql) KindOf(n string) Kind { return kindFromTypeName(n) }
 func (mysql) TypeName(c Column, isKey bool) string {
 	switch c.Kind {
 	case Int:
@@ -325,8 +346,19 @@ func (mssql) RejectsNUL() bool         { return false }
 var mssqlUDTs = map[string]string{"GEOGRAPHY": "%s.ToString()", "GEOMETRY": "%s.ToString()", "HIERARCHYID": "%s.ToString()"}
 
 func (mssql) BinaryUDTs() map[string]string { return mssqlUDTs }
-func (mssql) MaxRows() int                  { return 1000 }
-func (mssql) HasSchemas() bool              { return true }
+func (mssql) TxDDL() bool                   { return true }
+
+// sys.partitions rows are documented as approximate; they need no VIEW DATABASE STATE.
+func (mssql) TableStats() string {
+	return `SELECT s.name, t.name,
+  (SELECT SUM(p.rows) FROM sys.partitions p WHERE p.object_id = t.object_id AND p.index_id IN (0, 1)),
+  (SELECT CAST(SUM(a.total_pages) AS bigint) * 8192 FROM sys.partitions p JOIN sys.allocation_units a
+     ON a.container_id = CASE WHEN a.type = 2 THEN p.partition_id ELSE p.hobt_id END
+   WHERE p.object_id = t.object_id)
+FROM sys.tables t JOIN sys.schemas s ON s.schema_id = t.schema_id`
+}
+func (mssql) MaxRows() int     { return 1000 }
+func (mssql) HasSchemas() bool { return true }
 func (mssql) KindOf(n string) Kind {
 	switch strings.ToUpper(n) {
 	case "TIMESTAMP", "ROWVERSION": // binary(8), not a time
@@ -426,9 +458,12 @@ func (sqlite) Placeholder(int) string        { return "?" }
 func (sqlite) MaxParams() int                { return 30000 }
 func (sqlite) RejectsNUL() bool              { return false }
 func (sqlite) BinaryUDTs() map[string]string { return nil }
-func (sqlite) MaxRows() int                  { return 2000 }
-func (sqlite) HasSchemas() bool              { return false }
-func (sqlite) KindOf(n string) Kind          { return kindFromTypeName(n) }
+func (sqlite) TxDDL() bool                   { return true }
+
+func (sqlite) TableStats() string   { return "" }
+func (sqlite) MaxRows() int         { return 2000 }
+func (sqlite) HasSchemas() bool     { return false }
+func (sqlite) KindOf(n string) Kind { return kindFromTypeName(n) }
 
 // TypeName uses declared types the driver reads back as the same kind:
 // TIMESTAMP and DATE text comes back as time.Time.

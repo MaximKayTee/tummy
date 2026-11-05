@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 var update = flag.Bool("update", false, "rewrite testdata golden files")
@@ -151,12 +152,18 @@ func TestInserterStripsNULForRejectingTargets(t *testing.T) {
 	if err := ins.Add(ctx, []any{2, "plain"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := ins.Add(ctx, []any{3, "bad\xf2\x8e\x6c\x1cbytes"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := ins.Flush(ctx); err != nil {
 		t.Fatal(err)
 	}
 	var v string
 	if err := d.QueryRowContext(ctx, "SELECT v FROM t WHERE id = 1").Scan(&v); err != nil || v != "ab" || ins.Stripped != 1 {
 		t.Fatalf("v=%q stripped=%d err=%v", v, ins.Stripped, err)
+	}
+	if err := d.QueryRowContext(ctx, "SELECT v FROM t WHERE id = 3").Scan(&v); err != nil || !utf8.ValidString(v) || ins.Repaired != 1 {
+		t.Fatalf("v=%q repaired=%d err=%v", v, ins.Repaired, err)
 	}
 }
 

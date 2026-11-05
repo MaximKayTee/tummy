@@ -56,11 +56,12 @@ type connRow struct {
 }
 
 type snapshot struct {
-	At     time.Time
-	Reps   []replication
-	Conns  []connRow
-	Daemon *state.Daemon
-	Err    error
+	At        time.Time
+	Reps      []replication
+	Conns     []connRow
+	ConnStats map[string]state.ConnStats // latest stats refresh per connection
+	Daemon    *state.Daemon
+	Err       error
 }
 
 type snapshotMsg snapshot
@@ -162,6 +163,9 @@ func (m Model) loadSnapshot() tea.Cmd {
 		if err != nil {
 			snap.Err = err
 			return snapshotMsg(snap)
+		}
+		if snap.ConnStats, err = st.ConnStats(ctx); err != nil {
+			snap.Err = err
 		}
 		snap.Daemon, err = st.DaemonStatus(ctx)
 		if err != nil {
