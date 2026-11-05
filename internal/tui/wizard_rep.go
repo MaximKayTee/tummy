@@ -775,6 +775,7 @@ func (w *repWizard) exploreStream(i int) tea.Cmd {
 		w.err = err.Error()
 		return nil
 	}
+	e.tables = w.srcTables // listed for the picker already; R lists again
 	w.explore, w.err = e, ""
 	return e.start()
 }
