@@ -484,6 +484,9 @@ func (e *explorer) start() tea.Cmd {
 	if e.isAPI {
 		return e.endpoint.focus()
 	}
+	if len(e.tables) > 0 {
+		return nil
+	}
 	return e.discover()
 }
 

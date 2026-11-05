@@ -88,6 +88,7 @@ type Model struct {
 
 	connResults map[string]connTestMsg
 	testing     map[string]bool
+	tableLists  map[string][]string // per connection: the last table list, reused by explore
 	inflight    map[string]bool
 	cancels     map[string]context.CancelFunc // stops the in-process runs
 	quitting    bool                          // leaving once the in-process runs have stopped
@@ -122,6 +123,7 @@ func New(opts Options) Model {
 		filter:      ti,
 		connResults: map[string]connTestMsg{},
 		testing:     map[string]bool{},
+		tableLists:  map[string][]string{},
 		inflight:    map[string]bool{},
 		cancels:     map[string]context.CancelFunc{},
 		spin:        sp,
@@ -256,6 +258,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) wizUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case discoverMsg:
+		if msg.Err == nil && len(msg.Tables) > 0 {
+			m.tableLists[msg.Conn] = msg.Tables
+		}
+	case connProbeMsg:
+		if msg.Err == nil && len(msg.Tables) > 0 {
+			m.tableLists[msg.Name] = msg.Tables
+		}
+	}
 	res, cmd := m.wiz.update(msg)
 	switch res {
 	case wizDone:
@@ -325,6 +337,7 @@ func (m Model) explore(name string) (tea.Model, tea.Cmd) {
 	if err != nil {
 		return m, status(err.Error(), true)
 	}
+	w.tables = m.tableLists[name] // R lists again
 	return m.openWizard(w, nil)
 }
 
