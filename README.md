@@ -47,6 +47,8 @@ schedule = "*/15 * * * *"
 
 `tummy check NAME` validates a replication.
 
+Previews never change a stream. Enter on a loaded stream shows its target data, `p` its source data; steps there are for looking and bookmarking. A stream is edited with `E`, and only that wizard's preview saves with ctrl+s.
+
 ```toml
 # bookmarks.toml
 [bookmark.paid_orders]
@@ -57,7 +59,7 @@ rep = "sales"
 stream = "orders"
 ```
 
-Bookmarks are saved queries on a connection: a `table` or `sql`, with `steps`. Nothing is written to the connection. `rep` and `stream` name the stream whose target table the bookmark was made on. In the UI: ctrl+s on a table, query or target preview that is not a stream; bookmarks list first in the connection's table list; `y` copies the query (OSC 52); `b` runs it in full and shows rows and time. In the sql editor (`S`) ctrl+s previews and ctrl+e executes the text as written, rows affected shown. `D` on a table, or `drop table` in the command palette, drops it after its name is typed. Both refused on `read_only` connections.
+Bookmarks are saved queries on a connection: a `table` or `sql`, with `steps`. Nothing is written to the connection or the replication. `rep` and `stream` name the stream the bookmark was made on; such bookmarks list under the stream in the replication detail. In the UI: `B` on any preview; bookmarks also list first in the connection's table list; `y` copies the query (OSC 52); `b` runs it in full and shows rows and time. In the sql editor (`S`) ctrl+s previews and ctrl+e executes the text as written, rows affected shown. `D` on a table, or `drop table` in the command palette, drops it after its name is typed. Both refused on `read_only` connections.
 
 ## Commands
 

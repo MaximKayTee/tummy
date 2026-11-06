@@ -371,6 +371,22 @@ func (m Model) forgetRuns(rep, stream string) tea.Cmd {
 	}
 }
 
+// deleteBookmark removes one bookmark from bookmarks.toml.
+func (m Model) deleteBookmark(name string) tea.Cmd {
+	home := m.opts.Home
+	return func() tea.Msg {
+		all, err := config.LoadBookmarks(config.BookmarksPath(home))
+		if err != nil {
+			return statusMsg{Text: err.Error(), IsErr: true}
+		}
+		delete(all.Bookmark, name)
+		if err := config.WriteBookmarks(all.Path, all); err != nil {
+			return statusMsg{Text: err.Error(), IsErr: true}
+		}
+		return deletedMsg{Text: "deleted bookmark " + name}
+	}
+}
+
 // forgetRun deletes one run from the history; the one before it shows as the last.
 func (m Model) forgetRun(run state.Run) tea.Cmd {
 	st := m.opts.State

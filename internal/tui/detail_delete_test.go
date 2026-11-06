@@ -110,8 +110,8 @@ func TestDetailRunKeysPickTheStream(t *testing.T) {
 	opts := testHome(t)
 	opts.RunCommand = []string{"sh", "-c", `[ "$1" = alpha ] && [ "$2" = --streams ] && [ "$3" = copy ] && echo ran >&2`, "tummy"}
 	m := detailOn(t, loaded(t, opts), "alpha", "copy")
-	// ctrl+s: the selected stream, detached
-	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	// S: the selected stream, detached
+	mm, cmd := m.Update(keyRunes("S"))
 	m = mm.(Model)
 	var done *runDoneMsg
 	for _, msg := range runBatch(t, cmd) {
@@ -120,7 +120,7 @@ func TestDetailRunKeysPickTheStream(t *testing.T) {
 		}
 	}
 	if done == nil || done.Err != nil {
-		t.Fatalf("ctrl+s detached run of copy: %+v", done)
+		t.Fatalf("S detached run of copy: %+v", done)
 	}
 	// s: the selected stream, in process
 	m = detailOn(t, loaded(t, opts), "alpha", "copy")

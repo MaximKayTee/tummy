@@ -750,13 +750,20 @@ func (m Model) keyDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m.back(), nil
 	}
-	names := rep.streamNames()
-	stream, hasStream := at(names, m.cursor[viewDetail])
+	row, onRow := at(rep.detailRows(), m.cursor[viewDetail])
+	stream, hasStream := row.stream, onRow && row.mark == nil
 	_, inFile := rep.stream(stream)
 	run, ran := rep.Last[stream]
 	switch {
 	case key.Matches(msg, keys.Back):
 		return m.back(), nil
+	case key.Matches(msg, keys.Enter) && onRow && row.mark != nil:
+		w, err := newBookmarkExplorer(m.opts, row.mark)
+		return m.openWizard(w, err)
+	case key.Matches(msg, keys.Delete) && onRow && row.mark != nil:
+		name := row.mark.Name
+		m.ask = &confirm{text: "delete bookmark " + name + "? y/n", onYes: func() tea.Cmd { return m.deleteBookmark(name) }}
+		return m, nil
 	case key.Matches(msg, keys.Enter) && hasStream:
 		if ran && run.Status == "error" {
 			return m.openRun(run), nil
@@ -1055,7 +1062,7 @@ func (m Model) rowCount() int {
 		return len(m.visibleReps())
 	case viewDetail:
 		if rep, ok := m.rep(m.repName); ok {
-			return len(rep.streamNames())
+			return len(rep.detailRows())
 		}
 	case viewHistory:
 		return len(m.visibleRuns())

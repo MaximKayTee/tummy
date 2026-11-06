@@ -40,12 +40,12 @@ func TestBookmarkSaveOpenDelete(t *testing.T) {
 	e.update(keyRight)
 	e.update(keySpace) // untick v
 
-	// ctrl+s off a stream asks for a name
-	e.update(keySave)
+	// B asks for a name
+	e.update(keyRunes("B"))
 	if e.page != pageBookmark || e.markForm.get("name") != "things" {
 		t.Fatalf("page=%d name=%q", e.page, e.markForm.get("name"))
 	}
-	e.update(keySave)
+	e.update(keyEnter)
 	if e.page != pagePreview || e.bookmark != "things" || e.dirty() {
 		t.Fatalf("saved: page=%d bookmark=%q err=%q dirty=%v", e.page, e.bookmark, e.markForm.err, e.dirty())
 	}
@@ -57,9 +57,9 @@ func TestBookmarkSaveOpenDelete(t *testing.T) {
 		t.Fatalf("head:\n%s", v)
 	}
 
-	// a second ctrl+s saves in place; the name is taken for a new bookmark
+	// a second B saves in place; the name is taken for a new bookmark
 	e.pipeline = append(e.pipeline, parseOne(t, "sort -id"))
-	e.update(keySave)
+	e.update(keyRunes("B"))
 	if e.page != pagePreview || readMarks(t, opts).Bookmark["things"].Steps != "filter id > 1 | sort -id | keep id" {
 		t.Fatalf("resave: %+v", readMarks(t, opts).Bookmark["things"])
 	}
@@ -122,22 +122,22 @@ func TestBookmarkQueryAndNameCheck(t *testing.T) {
 	if len(e.rows) != 2 {
 		t.Fatalf("sql preview: %d %s", len(e.rows), e.fetchErr)
 	}
-	e.update(keySave)
+	e.update(keyRunes("B"))
 	if e.page != pageBookmark || e.markForm.get("name") != "query" {
 		t.Fatalf("page=%d name=%q", e.page, e.markForm.get("name"))
 	}
 	e.markForm.set("name", "taken")
-	e.update(keySave)
+	e.update(keyEnter)
 	if e.page != pageBookmark || e.markForm.field("name").err != "exists" {
 		t.Fatalf("taken: page=%d err=%q", e.page, e.markForm.field("name").err)
 	}
 	e.markForm.set("name", "bad name")
-	e.update(keySave)
+	e.update(keyEnter)
 	if e.page != pageBookmark {
 		t.Fatal("bad name accepted")
 	}
 	e.markForm.set("name", "small")
-	e.update(keySave)
+	e.update(keyEnter)
 	if e.page != pagePreview || e.bookmark != "small" {
 		t.Fatalf("save: page=%d err=%q", e.page, e.markForm.err)
 	}
@@ -165,8 +165,8 @@ func TestTargetBookmarkNamesStream(t *testing.T) {
 	if len(e.rows) != 1 {
 		t.Fatalf("rows=%d %s", len(e.rows), e.fetchErr)
 	}
-	e.update(keySave)
-	e.update(keySave)
+	e.update(keyRunes("B"))
+	e.update(keyEnter)
 	b := readMarks(t, opts).Bookmark["things"]
 	if b == nil || b.Conn != "TGT" || b.Rep != "alpha" || b.Stream != "things" || b.Steps != "filter id = 1" {
 		t.Fatalf("bookmark: %+v", b)
@@ -236,5 +236,87 @@ func TestBenchRunsFull(t *testing.T) {
 	e.update(benchMsg{seq: e.benchSeq, err: os.ErrClosed})
 	if e.currentNote() == "" {
 		t.Fatal("error note")
+	}
+}
+
+func TestSourcePreviewNeverSavesTheStream(t *testing.T) {
+	opts := testHome(t)
+	m := loaded(t, opts)
+	m = press(m, "enter", "p") // alpha › things, source preview
+	e, ok := m.wiz.(*explorer)
+	if !ok || e.streamName != "things" || e.canSaveBack() {
+		t.Fatalf("p: %+v", m.wiz)
+	}
+	run(e, e.start())
+	before, _ := os.ReadFile(filepath.Join(opts.Home, "replications", "alpha.toml"))
+	e.pipeline = append(e.pipeline, parseOne(t, "filter id > 1"))
+	press1(e, keyRunes("R"))
+	if _, cmd := e.update(keySave); cmd != nil || e.page != pagePreview {
+		t.Fatal("ctrl+s must do nothing on a source preview")
+	}
+	after, _ := os.ReadFile(filepath.Join(opts.Home, "replications", "alpha.toml"))
+	if string(before) != string(after) {
+		t.Fatalf("alpha.toml changed:\n%s", after)
+	}
+	if f, _, _ := e.previewKeys(); strings.Contains(strings.Join(f, " "), "ctrl+s") || !strings.Contains(strings.Join(f, " "), "B") {
+		t.Fatalf("footer: %v", f)
+	}
+	// B bookmarks it under the stream
+	e.update(keyRunes("B"))
+	e.update(keyEnter)
+	b := readMarks(t, opts).Bookmark["things"]
+	if b == nil || b.Conn != "SRC" || b.Rep != "alpha" || b.Stream != "things" || b.Steps != "filter id > 1" {
+		t.Fatalf("bookmark: %+v", b)
+	}
+	// a stream with where cannot be bookmarked from the source
+	e.spec.Where = "id > 0"
+	e.bookmark = ""
+	if e.update(keyRunes("B")); e.page != pagePreview || !strings.Contains(e.currentNote(), "where") {
+		t.Fatalf("where: page=%d note=%q", e.page, e.currentNote())
+	}
+}
+
+func TestDetailListsBookmarksUnderTheStream(t *testing.T) {
+	opts := testHome(t)
+	os.WriteFile(config.BookmarksPath(opts.Home), []byte(
+		"[bookmark.big]\nconn = \"TGT\"\ntable = \"things\"\nsteps = \"filter id > 1\"\nrep = \"alpha\"\nstream = \"things\"\n"+
+			"[bookmark.lost]\nconn = \"SRC\"\ntable = \"things\"\nrep = \"alpha\"\nstream = \"gone\"\n"), 0o600)
+	m := loaded(t, opts)
+	m = press(m, "enter")
+	rep, _ := m.rep("alpha")
+	rows := rep.detailRows()
+	if len(rows) != 4 || rows[0].stream != "things" || rows[1].mark == nil || rows[1].mark.Name != "big" || rows[2].stream != "copy" || rows[3].mark == nil || rows[3].mark.Name != "lost" {
+		t.Fatalf("rows: %+v", rows)
+	}
+	v := m.View()
+	if !strings.Contains(v, "› big") || !strings.Contains(v, "bookmark") || !strings.Contains(v, "› lost") {
+		t.Fatalf("view:\n%s", v)
+	}
+	m.cursor[viewDetail] = 1
+	if w := m.detailEnterWord(); w != "bookmark" {
+		t.Fatalf("enter word: %q", w)
+	}
+	// the target table does not exist yet: the explorer opens on TGT and reports the error
+	mm, cmd := m.Update(keyEnter)
+	m = mm.(Model)
+	e, ok := m.wiz.(*explorer)
+	if !ok || e.conn.Name != "TGT" || e.bookmark != "big" || len(e.pipeline) != 1 || e.page != pagePreview {
+		t.Fatalf("enter on a bookmark: %+v", m.wiz)
+	}
+	_ = cmd
+	// d deletes it
+	m = loaded(t, opts)
+	m = press(m, "enter")
+	m.cursor[viewDetail] = 1
+	m = press(m, "d")
+	if m.ask == nil || m.ask.text != "delete bookmark big? y/n" {
+		t.Fatalf("ask: %+v", m.ask)
+	}
+	_, cmd = m.Update(keyRunes("y"))
+	if d, ok := cmd().(deletedMsg); !ok || d.IsErr {
+		t.Fatalf("delete: %+v", cmd())
+	}
+	if all := readMarks(t, opts); all.Bookmark["big"] != nil || all.Bookmark["lost"] == nil {
+		t.Fatalf("file: %v", all.Names())
 	}
 }

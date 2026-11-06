@@ -34,7 +34,7 @@ var keys = keyMap{
 	Run:               key.NewBinding(key.WithKeys("r")),
 	RunStream:         key.NewBinding(key.WithKeys("s")),
 	RunDetached:       key.NewBinding(key.WithKeys("ctrl+r")),
-	RunStreamDetached: key.NewBinding(key.WithKeys("ctrl+s")),
+	RunStreamDetached: key.NewBinding(key.WithKeys("S")),
 	Toggle:            key.NewBinding(key.WithKeys("e")),
 	History:           key.NewBinding(key.WithKeys("H")),
 	Conns:             key.NewBinding(key.WithKeys("c")),

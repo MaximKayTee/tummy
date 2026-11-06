@@ -293,7 +293,7 @@ func (m Model) shortHelp() string {
 	case viewList:
 		return helpLine("enter", "open", "n", "new", "E", "edit", "D", "duplicate", "r", "run", "ctrl+r", "run detached", "t", "dry run", "e", "on/off", "d", "delete", "c", "connections", "H", "history", "/", "filter")
 	case viewDetail:
-		pairs := []string{"E", "edit", "a", "add", "r", "run", "ctrl+r", "run detached", "t", "dry run", "s", "run stream", "ctrl+s", "stream detached", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
+		pairs := []string{"E", "edit", "a", "add", "r", "run", "ctrl+r", "run detached", "t", "dry run", "s", "run stream", "S", "stream detached", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
 		if rep, ok := m.rep(m.repName); ok && rep.Running > 0 {
 			pairs = append(pairs, "x", "cancel run")
 		}
@@ -324,10 +324,14 @@ func (m Model) detailEnterWord() string {
 	if !ok {
 		return "data"
 	}
-	name, ok := at(rep.streamNames(), m.cursor[viewDetail])
+	row, ok := at(rep.detailRows(), m.cursor[viewDetail])
 	if !ok {
 		return "data"
 	}
+	if row.mark != nil {
+		return "bookmark"
+	}
+	name := row.stream
 	if run, ran := rep.Last[name]; ran && run.Status == "error" {
 		return "error"
 	}
@@ -378,9 +382,9 @@ func (m Model) helpPages() []helpPage {
 		})
 	case viewDetail:
 		section("streams", [][2]string{
-			{"enter", "loaded data in the target; a failed stream: its run"}, {"p", "source preview"}, {"E", "edit the stream"}, {"a", "add tables or an endpoint"},
-			{"e", "stream on/off; (replication): the replication"}, {"d", "delete the stream (y/n); from a table pattern: exclude it; run history only: forget the runs"},
-			{"r", "run every stream"}, {"ctrl+r", "run every stream as its own process; survives quitting the TUI"}, {"s", "run the stream"}, {"ctrl+s", "run the stream as its own process"},
+			{"enter", "loaded data in the target; a failed stream: its run; a bookmark: its query"}, {"p", "source preview; steps there are not saved to the stream"}, {"E", "edit the stream; its preview saves with ctrl+s"}, {"a", "add tables or an endpoint"},
+			{"e", "stream on/off; (replication): the replication"}, {"d", "delete the stream or bookmark (y/n); from a table pattern: exclude it; run history only: forget the runs"},
+			{"r", "run every stream"}, {"ctrl+r", "run every stream as its own process; survives quitting the TUI"}, {"s", "run the stream"}, {"S", "run the stream as its own process"},
 			{"x", "cancel the run (y/n)"}, {"H", "history of the stream"},
 		})
 	case viewHistory:
@@ -577,7 +581,18 @@ func (m Model) detailView() []string {
 		cols = []column{{Title: "STREAM"}, {Title: "MODE", Width: 12}, {Title: "LAST RUN", Width: 10}, {Title: "ROWS", Width: 8, Right: true}, {Title: "STATUS"}}
 	}
 	var rows [][]string
-	for _, name := range rep.streamNames() {
+	for _, dr := range rep.detailRows() {
+		name := dr.stream
+		if b := dr.mark; b != nil {
+			label := sDim.Render("  › " + txt.Clean(b.Name))
+			steps := sDim.Render(txt.Clean(markText(b)))
+			if wide {
+				rows = append(rows, []string{label, sDim.Render(txt.Clean(b.Conn)), sDim.Render("bookmark"), "", "", "", "", steps})
+			} else {
+				rows = append(rows, []string{label, sDim.Render("bookmark"), "", "", steps})
+			}
+			continue
+		}
 		spec, inFile := rep.stream(name)
 		run, ran := rep.Last[name]
 		label := txt.Clean(name)
@@ -625,9 +640,13 @@ func (m Model) detailView() []string {
 		}
 		rows = append(rows, row)
 	}
+	if m.snap.MarksErr != "" {
+		lines = append(lines[:len(lines)-1], " "+sErr.Render(glyphErr+" "+txt.Clean(txt.FirstLine(m.snap.MarksErr))), "")
+	}
 	var panel []string
 	if m.height >= 18 {
-		if name, ok := at(rep.streamNames(), m.cursor[viewDetail]); ok {
+		if row, ok := at(rep.detailRows(), m.cursor[viewDetail]); ok && row.mark == nil {
+			name := row.stream
 			var def []string
 			if run, ran := rep.Last[name]; ran && (run.Status == "error" || run.Status == "skipped" || run.Status == "cancelled") && run.Error != "" {
 				box := sErrBox

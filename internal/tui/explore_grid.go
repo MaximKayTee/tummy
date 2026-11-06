@@ -493,9 +493,8 @@ func (e *explorer) keyPreview(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	case ":", "ctrl+p":
 		return wizContinue, e.openPalette(false)
 	case "ctrl+s":
-		if e.streamName != "" {
-			return wizContinue, e.saveBack()
-		}
+		return wizContinue, e.saveBack()
+	case "B":
 		return wizContinue, e.saveBookmark()
 	case "y":
 		if e.steppable() {

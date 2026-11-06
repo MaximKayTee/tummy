@@ -31,13 +31,16 @@ func (e *explorer) canBookmark() bool {
 	return e.steppable() && len(e.cols) > 0 && !e.editSQL
 }
 
-// saveBookmark is ctrl+s off a stream: a known bookmark is rewritten, anything else
-// asks for a name.
+// saveBookmark is B: a known bookmark is rewritten, anything else asks for a name.
 func (e *explorer) saveBookmark() tea.Cmd {
-	if !e.canBookmark() {
+	switch {
+	case !e.canBookmark():
 		if e.steppable() && len(e.cols) == 0 {
 			e.setNote("no preview", true)
 		}
+		return nil
+	case e.spec.Where != "" || len(e.spec.Select) > 0 || e.spec.Range != "":
+		e.setNote("stream has where, select or range: bookmark its target data", true)
 		return nil
 	}
 	if e.bookmark != "" {
@@ -50,8 +53,8 @@ func (e *explorer) saveBookmark() tea.Cmd {
 }
 
 func (e *explorer) toBookmarkForm() tea.Cmd {
-	if !e.canBookmark() {
-		return nil
+	if !e.canBookmark() || e.spec.Where != "" || len(e.spec.Select) > 0 || e.spec.Range != "" {
+		return e.saveBookmark() // the note
 	}
 	def := e.bookmark
 	if def == "" {
@@ -120,13 +123,28 @@ func (e *explorer) writeBookmark(name string) error {
 
 // openBookmark previews a bookmark: its table or sql with its steps as the pipeline.
 func (e *explorer) openBookmark(b *config.Bookmark) tea.Cmd {
+	e.loadBookmark(b)
+	return e.fetch()
+}
+
+func (e *explorer) loadBookmark(b *config.Bookmark) {
 	e.resetPreview()
 	e.table, e.streamName = "", ""
-	e.onRep, e.onStream = b.Rep, b.Stream
 	e.openSpec(b.Table, config.Stream{SQL: b.SQL, Steps: b.Steps})
+	e.onRep, e.onStream = b.Rep, b.Stream
 	e.bookmark = b.Name
 	e.page = pagePreview
-	return e.fetch()
+}
+
+// newBookmarkExplorer opens the explorer on a bookmark; esc leaves.
+func newBookmarkExplorer(opts Options, b *config.Bookmark) (*explorer, error) {
+	e, err := newExplorer(opts, b.Conn)
+	if err != nil {
+		return nil, err
+	}
+	e.loadBookmark(b)
+	e.fromStream = true
+	return e, nil
 }
 
 func (e *explorer) deleteBookmark(name string) error {

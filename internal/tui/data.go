@@ -29,9 +29,10 @@ type replication struct {
 	Schedule string
 	Enabled  bool
 	Streams  []config.ResolvedStream
-	Err      string // the file does not load
-	ConnErr  string // source or target is not in connections.toml
-	SchedErr string // the daemon could not load or schedule it
+	Marks    []*config.Bookmark // bookmarks made on its streams
+	Err      string             // the file does not load
+	ConnErr  string             // source or target is not in connections.toml
+	SchedErr string             // the daemon could not load or schedule it
 
 	Last    map[string]state.Run // newest run per stream
 	Running int
@@ -64,6 +65,7 @@ type snapshot struct {
 	ConnStats map[string]state.ConnStats // latest stats refresh per connection
 	Tables    map[string]state.TableStat // latest reading per table, by state.TableKey
 	Daemon    *state.Daemon
+	MarksErr  string // bookmarks.toml does not load
 	Err       error
 }
 
@@ -189,9 +191,20 @@ func (m Model) loadSnapshot() tea.Cmd {
 			return snapshotMsg(snap)
 		}
 
+		var marks *config.Bookmarks
+		if marks, err = config.LoadBookmarks(config.BookmarksPath(opts.Home)); err != nil {
+			snap.MarksErr = err.Error()
+		}
 		for i, c := range cache.replications(files) {
 			f := files[i]
 			rep := replication{Path: f, Last: map[string]state.Run{}, Bytes: -1}
+			if marks != nil {
+				for _, n := range marks.Names() {
+					if b := marks.Bookmark[n]; b.Rep == config.NameOf(f) {
+						rep.Marks = append(rep.Marks, b)
+					}
+				}
+			}
 			if c.err != nil {
 				rep.Name = config.NameOf(f)
 				rep.Err = strings.TrimPrefix(c.err.Error(), f+": ")
@@ -350,6 +363,34 @@ func (r replication) streamNames() []string {
 		names = append([]string{"*"}, names...)
 	}
 	return names
+}
+
+// detailRow is a row of the replication detail: a stream, or a bookmark under it.
+type detailRow struct {
+	stream string
+	mark   *config.Bookmark
+}
+
+// detailRows lists the streams, each followed by its bookmarks; bookmarks of streams no
+// longer listed come last.
+func (r replication) detailRows() []detailRow {
+	var out []detailRow
+	seen := map[string]bool{}
+	for _, n := range r.streamNames() {
+		out = append(out, detailRow{stream: n})
+		seen[n] = true
+		for _, b := range r.Marks {
+			if b.Stream == n {
+				out = append(out, detailRow{stream: n, mark: b})
+			}
+		}
+	}
+	for _, b := range r.Marks {
+		if !seen[b.Stream] {
+			out = append(out, detailRow{stream: b.Stream, mark: b})
+		}
+	}
+	return out
 }
 
 // fromPattern: name is not a stream of the file but a table pattern in it matches it.

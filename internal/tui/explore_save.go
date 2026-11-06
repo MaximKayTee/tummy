@@ -18,19 +18,16 @@ const newRepOption = "new replication"
 
 // ---------- ctrl+s: back to the stream ----------
 
+// canSaveBack: only a wizard's preview writes a stream; exploring never does.
 func (e *explorer) canSaveBack() bool {
-	return e.repName != "" && e.streamName != ""
+	return e.bound != nil && e.streamName != ""
 }
 
 // saveBack writes the steps, select and sql of the preview to the stream it came from.
 // A table opened through a wildcard becomes its own stream.
 func (e *explorer) saveBack() tea.Cmd {
 	switch {
-	case e.streamName == "":
-		e.setNote("not a stream  +: add", true)
-		return nil
-	case e.repName == "":
-		e.setNote("replication unknown  +: add", true)
+	case !e.canSaveBack():
 		return nil
 	case e.stepsErr != "" && len(e.pipeline) == 0:
 		e.setNote(e.stepsErr, true)
@@ -231,13 +228,14 @@ func (e *explorer) toStreamForm() tea.Cmd {
 	s := e.draft.Defaults
 	e.editing = ""
 	i := slices.IndexFunc(e.draft.Streams, func(sd config.StreamDraft) bool { return sd.Name == name })
+	isNew := i < 0 || e.bound == nil // exploring adds a stream; only a wizard edits one
 	switch {
-	case i >= 0:
+	case !isNew:
 		s, e.editing = e.draft.Streams[i].Stream, name
 	case e.streamName != "":
-		s = e.spec // the stream as opened, into another replication
+		s = e.spec // the stream as opened, as a new stream
 	}
-	if err := e.applyEdits(&s, e.tickedCols(), i < 0); err != nil {
+	if err := e.applyEdits(&s, e.tickedCols(), isNew); err != nil {
 		if e.repPick != nil {
 			e.repPick.err = err.Error()
 		} else {

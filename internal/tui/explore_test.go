@@ -164,13 +164,16 @@ func TestExplorerDB(t *testing.T) {
 	if len(r.Resolved) != 2 || r.Resolved[1].Name != "things" || r.Resolved[1].Object != "things_renamed" || strings.Join(r.Resolved[1].Select, ",") != "id" {
 		t.Fatalf("appended: %+v", r.Resolved)
 	}
-	// the same name again is refused instead of replacing it
+	// exploring adds streams, never edits one: an existing name is refused
 	e3 := openThings(t, opts)
 	e3.update(keyRunes("+"))
 	e3.repPick.set("rep", "counts")
 	e3.update(keySave)
-	if e3.editing != "things" || e3.stream.get("object") != "things_renamed" {
-		t.Fatalf("existing stream prefills: %q %q", e3.editing, e3.stream.get("object"))
+	if e3.editing != "" || e3.stream.get("object") == "things_renamed" {
+		t.Fatalf("existing stream must not be edited from a preview: %q %q", e3.editing, e3.stream.get("object"))
+	}
+	if e3.update(keySave); e3.page != pageStream || !strings.Contains(e3.stream.err, "exists") {
+		t.Fatalf("duplicate name refused: %q", e3.stream.err)
 	}
 	e3.stream.set("name", "thing_count")
 	if e3.update(keySave); e3.page != pageStream || !strings.Contains(e3.stream.err, "exists") {
@@ -422,11 +425,16 @@ func TestWildcardCarriesSettings(t *testing.T) {
 	if len(e.rows) != 1 || len(e.pipeline) != 1 || e.spec.Where != "id > 1" {
 		t.Fatalf("wildcard settings: rows=%d %+v %s", len(e.rows), e.pipeline, e.fetchErr)
 	}
+	// exploring never writes the file
 	e.update(keyRight)
 	e.update(keySpace)
-	e.update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	if s := streamOf(readRep(t, opts, "wild"), "other"); s.Steps != "limit 1 | keep id" || s.Where != "id > 1" {
-		t.Fatalf("written as its own stream: %+v (%s)", s, e.note)
+	if _, cmd := e.update(tea.KeyMsg{Type: tea.KeyCtrlS}); cmd != nil || e.canSaveBack() {
+		t.Fatal("ctrl+s on an explored table")
+	}
+	for _, rs := range readRep(t, opts, "wild").Resolved {
+		if rs.Name == "other" {
+			t.Fatal("written as its own stream")
+		}
 	}
 	// an expanded stream previews with the wildcard's settings
 	e2, _ := newStreamExplorer(opts, "SRC", config.ResolvedStream{Name: "other"})
@@ -645,12 +653,24 @@ func TestSaveBackToStream(t *testing.T) {
 	opts := testHome(t)
 	os.WriteFile(filepath.Join(config.ReplicationsDir(opts.Home), "keep.toml"), []byte(
 		"source = \"SRC\"\ntarget = \"TGT\"\n[streams.things]\nprimary_key = [\"id\"]\nlimit = 5\ndisabled = true\nquery_timeout = \"30s\"\nselect = [\"id\"]\n"), 0o644)
-	r := readRep(t, opts, "keep")
-	e, err := newRepStreamExplorer(opts, "keep", "SRC", r.Resolved[0])
+	raw, err := config.LoadReplicationRaw(filepath.Join(config.ReplicationsDir(opts.Home), "keep.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := config.DraftOf(raw)
+	e, err := newDraftStreamExplorer(opts, &d, d.Streams[0]) // a wizard's preview: the one place that saves a stream
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer e.h.close()
+	draftStream := func() config.Stream {
+		for _, sd := range d.Streams {
+			if sd.Name == "things" {
+				return sd.Stream
+			}
+		}
+		return config.Stream{}
+	}
 	run(e, e.start())
 	if len(e.cols) != 2 || strings.Join(e.tickedCols(), ",") != "id" {
 		t.Fatalf("select as ticks: %v %v", e.colNames(), e.tickedCols())
@@ -667,19 +687,18 @@ func TestSaveBackToStream(t *testing.T) {
 	}
 	e.update(keyRunes("n"))
 	e.update(tea.KeyMsg{Type: tea.KeyCtrlS})
-	s := streamOf(readRep(t, opts, "keep"), "things")
+	s := draftStream()
 	if s.Steps != "limit 2 | keep id" || len(s.Select) != 0 || s.Limit != 5 || !s.Disabled || s.QueryTimeout != "30s" {
 		t.Fatalf("saved back: %+v (%s)", s, e.note)
+	}
+	if file := streamOf(readRep(t, opts, "keep"), "things"); file.Steps != "" {
+		t.Fatal("the draft's preview wrote the file")
 	}
 	if e.dirty() {
 		t.Fatal("clean after saving")
 	}
 	// + on the stream edits it in place and keeps every key
 	e.update(keyRunes("+"))
-	if e.repPick.get("rep") != "keep" {
-		t.Fatalf("+ defaults to the stream's replication: %q", e.repPick.get("rep"))
-	}
-	e.update(keySave)
 	if e.editing != "things" || e.stream.get("limit") != "5" || !e.stream.on("disabled") || strings.Join(e.stream.picked("primary_key"), ",") != "id" {
 		t.Fatalf("prefilled from the stream: %q %q", e.editing, e.stream.get("limit"))
 	}
@@ -687,7 +706,7 @@ func TestSaveBackToStream(t *testing.T) {
 	if e.update(keySave); e.page != pagePreview {
 		t.Fatalf("save: %q", e.stream.err)
 	}
-	s = streamOf(readRep(t, opts, "keep"), "things")
+	s = draftStream()
 	if s.Object != "things_out" || s.Limit != 5 || !s.Disabled || s.QueryTimeout != "30s" || s.Steps != "limit 2 | keep id" {
 		t.Fatalf("kept: %+v", s)
 	}
@@ -1102,7 +1121,7 @@ func TestCellsEscapeControls(t *testing.T) {
 func TestEnterOnUnloadedStreamPreviews(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "enter", "enter")
-	if e, ok := m.wiz.(*explorer); !ok || e.onStream != "" || e.table != "things" || e.conn.Name != "SRC" {
+	if e, ok := m.wiz.(*explorer); !ok || e.canSaveBack() || e.table != "things" || e.conn.Name != "SRC" {
 		t.Fatalf("enter on an unloaded stream should preview the source: %+v", m.wiz)
 	}
 }

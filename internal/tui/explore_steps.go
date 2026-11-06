@@ -207,7 +207,7 @@ func (e *explorer) openPalette(stepsOnly bool) tea.Cmd {
 			add("save to "+e.repName+" › "+e.streamName, "save", "ctrl+s")
 		}
 		if e.canBookmark() {
-			add("bookmark", "bookmark", "")
+			add("bookmark", "bookmark", "B")
 		}
 		if e.table != "" && e.spec.SQL == "" && e.writable() {
 			add("drop table "+e.table, "drop", "")

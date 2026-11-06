@@ -292,6 +292,7 @@ func newRepStreamExplorer(opts Options, rep, connName string, s config.ResolvedS
 	e.fromStream = true
 	e.streamName = s.Name
 	e.openSpec(s.Name, spec)
+	e.onRep, e.onStream = e.repName, s.Name
 	e.page = pagePreview
 	return e, nil
 }
@@ -459,11 +460,11 @@ func (e *explorer) previewKeys() ([]string, map[string]bool, string) {
 		pairs = append(pairs, "t", "step", "tab", "steps")
 	}
 	pairs = append(pairs, "space", "tick")
-	switch {
-	case e.canSaveBack():
+	if e.canSaveBack() {
 		pairs = append(pairs, "ctrl+s", "save")
-	case e.canBookmark():
-		pairs = append(pairs, "ctrl+s", "bookmark")
+	}
+	if e.canBookmark() {
+		pairs = append(pairs, "B", "bookmark")
 	}
 	pairs = append(pairs, "+", "add", "m", "more", "v", "value")
 	if e.steppable() {
@@ -524,13 +525,14 @@ func (e *explorer) keyHelp() (string, [][2]string) {
 		rows = append(rows, [2]string{":", "commands"}, [2]string{"v  enter", "full value"}, [2]string{"m", "more rows"},
 			[2]string{"R", "refresh"}, [2]string{"> <", "column width"}, [2]string{"=", "column width reset"}, [2]string{"w", "wide columns"},
 			[2]string{"+", "add to replication"})
-		switch {
-		case e.canSaveBack():
+		if e.canSaveBack() {
 			rows = append(rows, [2]string{"ctrl+s", "save to " + e.repName + ".toml › " + e.streamName})
+		}
+		switch {
 		case e.bookmark != "":
-			rows = append(rows, [2]string{"ctrl+s", "save bookmark " + e.bookmark})
+			rows = append(rows, [2]string{"B", "save bookmark " + e.bookmark})
 		case e.canBookmark():
-			rows = append(rows, [2]string{"ctrl+s", "bookmark"})
+			rows = append(rows, [2]string{"B", "bookmark: the table or query and the steps, in bookmarks.toml; the replication is not changed"})
 		}
 		return "preview", append(rows, [2]string{"esc", "back"})
 	case pageStep:
@@ -543,7 +545,7 @@ func (e *explorer) keyHelp() (string, [][2]string) {
 	case pageTarget, pageStream:
 		return "add to replication", [][2]string{{"tab  ↓", "next field"}, {"ctrl+s", "save"}, {"esc", "back"}}
 	case pageBookmark:
-		return "bookmark", [][2]string{{"enter  ctrl+s", "save"}, {"esc", "back"}}
+		return "bookmark", [][2]string{{"enter", "save"}, {"esc", "back"}}
 	case pageDrop:
 		return "drop table", [][2]string{{"enter", "drop; the table name must match"}, {"esc", "back"}}
 	}
