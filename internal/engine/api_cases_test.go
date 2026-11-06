@@ -94,6 +94,30 @@ path = "/a"
 	}
 }
 
+// A loaded parent is read from its target table, not fetched again.
+func TestAPIForEachChildOnlyReadsLoadedParent(t *testing.T) {
+	f, tr := treeFixture(t)
+	r := f.replication(`
+source = "T"
+target = "TGT"
+[streams.a]
+path = "/a"
+[streams.b]
+path = "/a/{a.id}/b"
+for_each = "a"
+`)
+	e := f.engine()
+	f.run(e, r, "a")
+	tr.mu.Lock()
+	tr.a = append(tr.a, map[string]any{"id": 3, "u": "2026-01-03"}) // in the API, not loaded
+	tr.mu.Unlock()
+	tr.hits.Store(0)
+	res := f.run(e, r, "b")
+	if len(res) != 1 || res[0].Rows != 4 || tr.hits.Load() != 2 {
+		t.Fatalf("%+v hits=%d", res, tr.hits.Load())
+	}
+}
+
 // The child's run reports each parent fetch as its own phase, then its own fetch.
 func TestAPIForEachChildOnlyProgress(t *testing.T) {
 	f, _ := treeFixture(t)

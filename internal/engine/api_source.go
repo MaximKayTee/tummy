@@ -46,11 +46,27 @@ func (a *apiRun) plan(streams []stream, selected func(stream) bool) {
 	}
 }
 
-// feed fetches a parent that is not selected, for its records only: no run, no load.
+// feed gets the records of a parent that is not selected: from its target table when it
+// is loaded, else fetched from the API. No run, no load.
 func (a *apiRun) feed(ctx context.Context, tgt *db.DB, name string, onParent func(string, int)) error {
 	s, ok := a.streams[name]
 	if !ok {
 		return fmt.Errorf("for_each %q is not a stream", name)
+	}
+	target := targetTable(tgt, s)
+	exists, err := tgt.TableExists(ctx, target)
+	if err != nil {
+		return fmt.Errorf("for_each %s: %w", name, err)
+	}
+	if exists {
+		onParent(name, 0)
+		recs, err := a.readTable(ctx, tgt, target, func(n int) { onParent(name, n) })
+		if err != nil {
+			return fmt.Errorf("for_each %s: %w", name, err)
+		}
+		a.records[name] = recs
+		a.e.log().Info("for_each parent read from target", "stream", name, "table", target.String(), "records", len(recs))
+		return nil
 	}
 	parents, err := a.parents(ctx, tgt, s, db.Table{}, false, onParent)
 	if err != nil {
@@ -64,6 +80,33 @@ func (a *apiRun) feed(ctx context.Context, tgt *db.DB, name string, onParent fun
 	a.records[name] = kids
 	a.e.log().Info("for_each parent fetched", "stream", name, "records", len(kids))
 	return nil
+}
+
+// readTable is every row of a target table as records keyed by column name.
+func (a *apiRun) readTable(ctx context.Context, tgt *db.DB, t db.Table, onPage func(int)) ([]api.Record, error) {
+	rd, err := tgt.Query(ctx, "SELECT * FROM "+tgt.Quote(t))
+	if err != nil {
+		return nil, err
+	}
+	defer rd.Close()
+	var out []api.Record
+	for {
+		row, err := rd.Next()
+		if err != nil {
+			return nil, err
+		}
+		if row == nil {
+			return out, nil
+		}
+		rec := make(api.Record, len(row))
+		for i, c := range rd.Columns {
+			rec[c.Name] = row[i]
+		}
+		out = append(out, rec)
+		if len(out)%1000 == 0 {
+			onPage(len(out))
+		}
+	}
 }
 
 // orderByForEach sorts streams so parents run before children.

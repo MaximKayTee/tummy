@@ -455,13 +455,13 @@ path = "/flaky"
 	if f.count("SELECT count(*) FROM user_posts WHERE user_name = 'Bob' AND user_id = 2") != 2 {
 		t.Fatal("for_each add_columns")
 	}
-	// only the child requested still runs its parent
+	// only the child requested: parents come from the loaded users table, no users call
 	api.hits.Store(0)
 	if _, err := f.engine().Run(context.Background(), r, []string{"user_posts"}); err != nil {
 		t.Fatal(err)
 	}
-	if api.hits.Load() != 3 {
-		t.Fatalf("want users + 2 post calls, got %d", api.hits.Load())
+	if api.hits.Load() != 2 {
+		t.Fatalf("want 2 post calls, got %d", api.hits.Load())
 	}
 }
 
