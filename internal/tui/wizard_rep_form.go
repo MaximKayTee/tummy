@@ -3,6 +3,7 @@ package tui
 import (
 	"cmp"
 	"errors"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -79,13 +80,49 @@ func (w *repWizard) streamFormKinds(sd config.StreamDraft, cols []string, kinds 
 	return f
 }
 
-// placeholders lists the parent's fields as {parent.field}, for the add_columns help.
-func placeholders(parent string, cols []string) string {
-	out := make([]string, 0, len(cols))
-	for _, c := range cols {
-		out = append(out, "{"+parent+"."+c+"}")
+// addColumnsField picks parent columns to copy under their own name once the parent's
+// columns are known; other entries stay as "col = {parent.field}" items. Before that it
+// is the pairs typed.
+func addColumnsField(s config.Stream, parentCols []string) *field {
+	withParent := func(f *form) bool { return f.get("for_each") != "" }
+	if len(parentCols) == 0 {
+		return text("add_columns", "Add columns", "").def(pairs(s.AddColumns)).check(checkPairs).when(withParent).helpFn(func(f *form) string {
+			if f.get("add_columns") != "" {
+				return ""
+			}
+			p := f.get("for_each")
+			return strings.TrimSuffix(p, "s") + "_id = {" + p + ".id}"
+		})
 	}
-	return strings.Join(out, "  ")
+	var picked []string
+	for _, col := range slices.Sorted(maps.Keys(s.AddColumns)) {
+		tmpl := s.AddColumns[col]
+		if tmpl == "{"+s.ForEach+"."+col+"}" && slices.Contains(parentCols, col) {
+			picked = append(picked, col)
+		} else {
+			picked = append(picked, col+" = "+tmpl)
+		}
+	}
+	return multi("add_columns", "Add columns", "parent columns; or col = {parent.field}", parentCols, picked).when(withParent)
+}
+
+// addColumnsPicked reads the add_columns picker: a column copies the parent's field of
+// that name, a pair as written.
+func addColumnsPicked(items []string, parent string) map[string]string {
+	out := map[string]string{}
+	for _, it := range items {
+		if strings.Contains(it, "=") {
+			if m, err := parsePairs(it); err == nil {
+				maps.Copy(out, m)
+			}
+			continue
+		}
+		out[it] = "{" + parent + "." + it + "}"
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // sinceOptions offers "col, 30d" per parent column.
@@ -162,16 +199,7 @@ func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, pa
 			choice("params_in", "Params in", "", "", "body").empty("query").def(s.ParamsIn).when(paged),
 			text("skip_on", "Skip on", "statuses that end the fetch, no error").eg("404").def(ints(s.SkipOn)).check(checkInts),
 			choice("for_each", "For each", "parent stream: one request per record, {parent.field}", cmp.Or(s.ForEach, "")).empty("none").def(s.ForEach),
-			text("add_columns", "Add columns", "").def(pairs(s.AddColumns)).check(checkPairs).when(func(f *form) bool { return f.get("for_each") != "" }).helpFn(func(f *form) string {
-				p := f.get("for_each")
-				if len(parentCols) > 0 {
-					return placeholders(p, parentCols)
-				}
-				if f.get("add_columns") != "" {
-					return ""
-				}
-				return strings.TrimSuffix(p, "s") + "_id = {" + p + ".id}"
-			}),
+			addColumnsField(s, parentCols),
 			combo("skip_existing", "Skip existing", "target column; parents already loaded are skipped", append([]string{""}, cols...)...).empty("none").eg("product_id").def(s.SkipExisting).when(func(f *form) bool { return f.get("for_each") != "" }),
 			combo("for_each_since", "For each since", "parent field, lower bound; Nd = days ago", sinceOptions(parentCols)...).empty("none").eg("created_at, 2026-01-01   created_at, 30d").def(s.ForEachSince).when(func(f *form) bool { return f.get("for_each") != "" }).check(func(v string) error {
 				if v == "" {
@@ -334,7 +362,15 @@ func streamFromFields(f *form, base config.Stream) config.Stream {
 	num("limit", &s.Limit)
 	list("primary_key", &s.PrimaryKey)
 	kv("query", &s.Query)
-	kv("add_columns", &s.AddColumns)
+	if has, read, fl := state("add_columns"); read && fl.Kind == kindMulti {
+		if f.fieldChanged("add_columns") {
+			s.AddColumns = addColumnsPicked(f.picked("add_columns"), f.get("for_each"))
+		}
+	} else if read {
+		s.AddColumns, _ = parsePairs(f.get("add_columns"))
+	} else if has {
+		s.AddColumns = nil
+	}
 	if has, read, fl := state("select"); read && fl.Kind == kindMulti {
 		if f.fieldChanged("select") {
 			s.Select = f.picked("select")
