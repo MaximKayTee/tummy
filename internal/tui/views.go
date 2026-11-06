@@ -293,13 +293,13 @@ func (m Model) shortHelp() string {
 	case viewList:
 		return helpLine("enter", "open", "n", "new", "E", "edit", "D", "duplicate", "r", "run", "ctrl+r", "run detached", "t", "dry run", "e", "on/off", "d", "delete", "c", "connections", "H", "history", "/", "filter")
 	case viewDetail:
-		pairs := []string{"E", "edit", "a", "add", "r", "run", "ctrl+r", "run detached", "t", "dry run", "s", "run stream", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
+		pairs := []string{"E", "edit", "a", "add", "r", "run", "ctrl+r", "run detached", "t", "dry run", "s", "run stream", "ctrl+s", "stream detached", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
 		if rep, ok := m.rep(m.repName); ok && rep.Running > 0 {
 			pairs = append(pairs, "x", "cancel run")
 		}
 		return helpLine(pairs...)
 	case viewHistory:
-		return helpLine("enter", "details", "/", "filter")
+		return helpLine("enter", "details", "d", "forget", "/", "filter")
 	case viewRun:
 		if m.planning {
 			return helpLine("esc", "back")
@@ -379,11 +379,12 @@ func (m Model) helpPages() []helpPage {
 	case viewDetail:
 		section("streams", [][2]string{
 			{"enter", "loaded data in the target; a failed stream: its run"}, {"p", "source preview"}, {"E", "edit the stream"}, {"a", "add tables or an endpoint"},
-			{"e", "stream on/off; (replication): the replication"}, {"d", "delete the stream (y/n)"}, {"r", "run every stream"}, {"ctrl+r", "run every stream as its own process; survives quitting the TUI"}, {"s", "run the stream"},
+			{"e", "stream on/off; (replication): the replication"}, {"d", "delete the stream (y/n); from a table pattern: exclude it; run history only: forget the runs"},
+			{"r", "run every stream"}, {"ctrl+r", "run every stream as its own process; survives quitting the TUI"}, {"s", "run the stream"}, {"ctrl+s", "run the stream as its own process"},
 			{"x", "cancel the run (y/n)"}, {"H", "history of the stream"},
 		})
 	case viewHistory:
-		section("history", [][2]string{{"enter", "run details"}, {"/", "filter"}})
+		section("history", [][2]string{{"enter", "run details"}, {"d", "forget the run (y/n); the one before it becomes the last"}, {"/", "filter"}})
 	case viewRun:
 		if m.planName != "" {
 			section("dry run", [][2]string{{"r", "run it"}, {"t", fmt.Sprintf("test load: the first %d rows per stream into a copy of the run's temp table, rolled back", engine.SampleRows)}, {"↑/↓ pgup/pgdn", "scroll"}})

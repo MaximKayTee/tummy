@@ -352,6 +352,19 @@ func (r replication) streamNames() []string {
 	return names
 }
 
+// fromPattern: name is not a stream of the file but a table pattern in it matches it.
+func (r replication) fromPattern(name string) bool {
+	if _, ok := r.stream(name); ok {
+		return false
+	}
+	for _, s := range r.Streams {
+		if s.IsWildcard() && wildMatch(s.Name, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r replication) stream(name string) (config.ResolvedStream, bool) {
 	for _, s := range r.Streams {
 		if s.Name == name {

@@ -211,6 +211,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status, m.statusAt = statusMsg(msg), time.Now()
 		clear(m.tableLists) // a deleted connection's name may be reused
 		m.clampCursor()
+		if m.view == viewHistory {
+			return m, tea.Batch(m.loadSnapshot(), m.loadRuns(m.repName, m.streamName))
+		}
 		return m, m.loadSnapshot()
 
 	case quitMsg:
@@ -784,19 +787,31 @@ func (m Model) keyDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startPlan(rep)
 	case key.Matches(msg, keys.RunStream) && hasStream && stream != "*":
 		return m.startRun(rep, []string{stream}, false)
+	case key.Matches(msg, keys.RunStreamDetached) && hasStream && stream != "*":
+		return m.startRun(rep, []string{stream}, true)
 	case key.Matches(msg, keys.Toggle):
 		switch {
 		case !hasStream || (stream == "*" && !inFile):
 			return m, tea.Sequence(m.toggleEnabled(rep), m.loadSnapshot())
-		case inFile && rep.Err == "":
+		case rep.Err != "":
+			return m, status(rep.Name+".toml does not load", true)
+		case inFile:
 			return m, m.toggleStream(rep, stream)
+		case rep.fromPattern(stream):
+			return m, status(stream+": from a table pattern  d: exclude", true)
 		}
-		return m, status(stream+": from a table pattern, not in "+rep.Name+".toml", true)
+		return m, status(stream+": not in "+rep.Name+".toml, run history only  d: forget", true)
 	case key.Matches(msg, keys.Delete) && hasStream && stream != "*":
-		if !inFile || rep.Err != "" {
-			return m, status(stream+": from a table pattern, not in "+rep.Name+".toml", true)
+		switch {
+		case rep.Err != "":
+			return m, status(rep.Name+".toml does not load", true)
+		case inFile:
+			m.ask = &confirm{text: "delete stream " + stream + "? y/n", onYes: func() tea.Cmd { return m.deleteStream(rep, stream) }}
+		case rep.fromPattern(stream):
+			m.ask = &confirm{text: "exclude " + stream + " from " + rep.Name + "? y/n", onYes: func() tea.Cmd { return m.excludeStream(rep, stream) }}
+		default:
+			m.ask = &confirm{text: "forget the runs of " + stream + "? y/n", onYes: func() tea.Cmd { return m.forgetRuns(rep.Name, stream) }}
 		}
-		m.ask = &confirm{text: "delete stream " + stream + "? y/n", onYes: func() tea.Cmd { return m.deleteStream(rep, stream) }}
 		return m, nil
 	case key.Matches(msg, keys.Cancel):
 		return m.askCancel(rep), nil
@@ -912,6 +927,12 @@ func (m Model) keyHistory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.back(), nil
 	case key.Matches(msg, keys.Enter) && ok:
 		return m.openRun(cur), nil
+	case key.Matches(msg, keys.Delete) && ok:
+		if cur.Status == "running" {
+			return m, status("running  x: cancel first", true)
+		}
+		m.ask = &confirm{text: "forget this run? y/n", onYes: func() tea.Cmd { return m.forgetRun(cur) }}
+		return m, nil
 	}
 	return m, nil
 }

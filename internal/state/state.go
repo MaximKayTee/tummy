@@ -607,6 +607,34 @@ func (s *Store) Prune(ctx context.Context, cutoff time.Time) (int64, error) {
 	return n + k, nil
 }
 
+// DeleteRuns forgets every run of one stream. A running one stays and is an error.
+func (s *Store) DeleteRuns(ctx context.Context, replication, stream string) (int64, error) {
+	var running int
+	if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM runs WHERE replication = ? AND stream = ? AND status = 'running'", replication, stream).Scan(&running); err != nil {
+		return 0, err
+	}
+	if running > 0 {
+		return 0, fmt.Errorf("%s › %s: running", replication, stream)
+	}
+	res, err := s.db.ExecContext(ctx, "DELETE FROM runs WHERE replication = ? AND stream = ?", replication, stream)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// DeleteRun forgets one run. A running one stays and is an error.
+func (s *Store) DeleteRun(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM runs WHERE id = ? AND status != 'running'", id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("run %d: running or gone", id)
+	}
+	return nil
+}
+
 // ---------- requests ----------
 
 // Enqueue queues a run for the daemon. The runs record trigger; without one, "daemon".

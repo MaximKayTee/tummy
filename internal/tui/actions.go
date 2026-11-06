@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -340,6 +341,50 @@ func (m Model) deleteStream(rep replication, stream string) tea.Cmd {
 		}
 		return errors.New(stream + ": not in " + rep.Name + ".toml")
 	})
+}
+
+// excludeStream adds a table matched by a pattern to the file's exclude list.
+func (m Model) excludeStream(rep replication, stream string) tea.Cmd {
+	return m.editDraft(rep, "excluded "+stream, func(d *config.ReplicationDraft) error {
+		if slices.Contains(d.Exclude, stream) {
+			return errors.New(stream + ": already excluded")
+		}
+		d.Exclude = append(d.Exclude, stream)
+		return nil
+	})
+}
+
+// forgetRuns deletes the run history of a stream that is no longer in the file.
+func (m Model) forgetRuns(rep, stream string) tea.Cmd {
+	st := m.opts.State
+	return func() tea.Msg {
+		if st == nil {
+			return statusMsg{Text: "no state database", IsErr: true}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		n, err := st.DeleteRuns(ctx, rep, stream)
+		if err != nil {
+			return statusMsg{Text: err.Error(), IsErr: true}
+		}
+		return deletedMsg{Text: fmt.Sprintf("forgot %d runs of %s", n, stream)}
+	}
+}
+
+// forgetRun deletes one run from the history; the one before it shows as the last.
+func (m Model) forgetRun(run state.Run) tea.Cmd {
+	st := m.opts.State
+	return func() tea.Msg {
+		if st == nil {
+			return statusMsg{Text: "no state database", IsErr: true}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := st.DeleteRun(ctx, run.ID); err != nil {
+			return statusMsg{Text: err.Error(), IsErr: true}
+		}
+		return deletedMsg{Text: "forgot run of " + run.Stream + " " + run.Started.Local().Format("2006-01-02 15:04")}
+	}
 }
 
 // firstOf is cmp.Or.
