@@ -22,23 +22,24 @@ import (
 )
 
 type previewMsg struct {
-	Cols     []db.Column
-	Rows     [][]any
-	SQL      string     // query sent, database sources
-	Args     []any      // its arguments
-	Steps    [][]string // columns each step sees
-	Total    int        // rows the query returns in all; -1 unknown
-	Counted  string     // query Total was counted for
-	Complete bool       // no rows beyond these
-	Parents  string     // for_each: "3 of 10 users"
-	Keys     []apiKey   // api: top-level keys of the response
-	WM       *watermarkInfo
-	PK       []string
-	PKFor    string
-	Note     string
-	Err      error
-	Took     time.Duration
-	seq      int
+	Cols       []db.Column
+	Rows       [][]any
+	SQL        string     // query sent, database sources
+	Args       []any      // its arguments
+	Steps      [][]string // columns each step sees
+	Total      int        // rows the query returns in all; -1 unknown
+	Counted    string     // query Total was counted for
+	Complete   bool       // no rows beyond these
+	Parents    string     // for_each: "3 of 10 users"
+	ParentCols []string   // for_each: the parent's columns
+	Keys       []apiKey   // api: top-level keys of the response
+	WM         *watermarkInfo
+	PK         []string
+	PKFor      string
+	Note       string
+	Err        error
+	Took       time.Duration
+	seq        int
 }
 
 // shownMsg is the query a run sends, for the sql panel.
@@ -400,6 +401,9 @@ func (e *explorer) applyPreview(msg previewMsg) tea.Cmd {
 	}
 	e.cols, e.rows, e.fetchErr = msg.Cols, msg.Rows, ""
 	e.total, e.counted, e.complete, e.parents = msg.Total, msg.Counted, msg.Complete, msg.Parents
+	if msg.ParentCols != nil {
+		e.parentCols = msg.ParentCols
+	}
 	if e.page == pageEndpoint {
 		e.page = pagePreview // errors stay on the endpoint form
 	}

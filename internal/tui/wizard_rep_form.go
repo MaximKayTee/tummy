@@ -36,7 +36,7 @@ func (w *repWizard) streamFormKinds(sd config.StreamDraft, cols []string, kinds 
 		w.colsSeen[sd.Name] = seen
 	}
 	api := w.isAPI()
-	fs := streamFieldsOf(sd.Stream, cols, kinds, api)
+	fs := streamFieldsOf(sd.Stream, cols, kinds, w.parentCols[sd.Stream.ForEach], api)
 	var name *field
 	if api {
 		name = text("name", "Name", "the target table unless object is set").eg("users").def(sd.Name)
@@ -79,12 +79,30 @@ func (w *repWizard) streamFormKinds(sd config.StreamDraft, cols []string, kinds 
 	return f
 }
 
+// placeholders lists the parent's fields as {parent.field}, for the add_columns help.
+func placeholders(parent string, cols []string) string {
+	out := make([]string, 0, len(cols))
+	for _, c := range cols {
+		out = append(out, "{"+parent+"."+c+"}")
+	}
+	return strings.Join(out, "  ")
+}
+
+// sinceOptions offers "col, 30d" per parent column.
+func sinceOptions(cols []string) []string {
+	out := []string{""}
+	for _, c := range cols {
+		out = append(out, c+", 30d")
+	}
+	return out
+}
+
 // streamFields lists the editable keys of a stream, filled from s. With cols known the
 // column keys are lists of them; api picks the endpoint keys over the table ones. The
 // replication wizard and the explorer build their stream forms from it; streamFromFields
 // reads a form back.
 func streamFields(s config.Stream, cols []string, api bool) []*field {
-	return streamFieldsOf(s, cols, nil, api)
+	return streamFieldsOf(s, cols, nil, nil, api)
 }
 
 // keyKinds are the column kinds an update key can compare; nil kinds: any column.
@@ -118,8 +136,9 @@ func kindNotes(kinds map[string]db.Kind) map[string]string {
 }
 
 // streamFieldsOf is streamFields with the kinds of the columns, so key lists offer only
-// loaded columns an update key can compare.
-func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, api bool) []*field {
+// loaded columns an update key can compare, and the for_each parent's columns for the
+// keys that name them.
+func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, parentCols []string, api bool) []*field {
 	in := func(key string, vals ...string) func(*form) bool {
 		return func(f *form) bool { return slices.Contains(vals, f.get(key)) }
 	}
@@ -144,14 +163,17 @@ func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, ap
 			text("skip_on", "Skip on", "statuses that end the fetch, no error").eg("404").def(ints(s.SkipOn)).check(checkInts),
 			choice("for_each", "For each", "parent stream: one request per record, {parent.field}", cmp.Or(s.ForEach, "")).empty("none").def(s.ForEach),
 			text("add_columns", "Add columns", "").def(pairs(s.AddColumns)).check(checkPairs).when(func(f *form) bool { return f.get("for_each") != "" }).helpFn(func(f *form) string {
+				p := f.get("for_each")
+				if len(parentCols) > 0 {
+					return placeholders(p, parentCols)
+				}
 				if f.get("add_columns") != "" {
 					return ""
 				}
-				p := f.get("for_each")
 				return strings.TrimSuffix(p, "s") + "_id = {" + p + ".id}"
 			}),
-			text("skip_existing", "Skip existing", "target column; parents already loaded are skipped").eg("product_id").def(s.SkipExisting).when(func(f *form) bool { return f.get("for_each") != "" }),
-			text("for_each_since", "For each since", "parent field, lower bound; Nd = days ago").eg("created_at, 2026-01-01   created_at, 30d").def(s.ForEachSince).when(func(f *form) bool { return f.get("for_each") != "" }).check(func(v string) error {
+			combo("skip_existing", "Skip existing", "target column; parents already loaded are skipped", append([]string{""}, cols...)...).empty("none").eg("product_id").def(s.SkipExisting).when(func(f *form) bool { return f.get("for_each") != "" }),
+			combo("for_each_since", "For each since", "parent field, lower bound; Nd = days ago", sinceOptions(parentCols)...).empty("none").eg("created_at, 2026-01-01   created_at, 30d").def(s.ForEachSince).when(func(f *form) bool { return f.get("for_each") != "" }).check(func(v string) error {
 				if v == "" {
 					return nil
 				}

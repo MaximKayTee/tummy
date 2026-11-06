@@ -101,41 +101,42 @@ type explorer struct {
 	wantSelect []string // ticks for the first result
 
 	// preview
-	cols     []db.Column
-	rows     [][]any
-	ticked   map[string]bool
-	fresh    bool // next result resets cursor and ticks
-	colCur   int
-	colOff   int
-	rowOff   int
-	rowCur   int
-	fetching bool
-	fetchSeq int
-	fetchErr string
-	note     string
-	noteErr  bool
-	noteAt   time.Time // notes fade after noteFor
-	took     time.Duration
-	sqlInput textarea.Model
-	editSQL  bool
-	limit    int    // rows (or pages for an API) to fetch, in batches
-	total    int    // rows the query returns in all; -1 unknown
-	counted  string // query total was counted for
-	complete bool   // every row is loaded: m has nothing to add
-	parents  string // for_each: parents the preview ran for, "3 of 10 users"
-	anchor   bool   // next result starts at the first row
-	args     []any  // arguments of compiled
-	shown    string // the query a run sends, ticks included, arguments inlined
-	shownSeq int
-	wm       *watermarkInfo // incremental streams: the bound a run starts from
-	respKeys []apiKey       // api: top-level keys of the response, for the endpoint form
-	srcPK    []string       // primary key of the previewed table
-	pkFor    string         // table srcPK was read for
-	natural  []int          // per-column width, measured once per fetch
-	widths   map[string]int // per-column width overrides
-	wide     bool           // no width cap
-	showVal  bool           // full value of the current cell
-	showCols bool           // schema: every column, its type and first value
+	cols       []db.Column
+	rows       [][]any
+	ticked     map[string]bool
+	fresh      bool // next result resets cursor and ticks
+	colCur     int
+	colOff     int
+	rowOff     int
+	rowCur     int
+	fetching   bool
+	fetchSeq   int
+	fetchErr   string
+	note       string
+	noteErr    bool
+	noteAt     time.Time // notes fade after noteFor
+	took       time.Duration
+	sqlInput   textarea.Model
+	editSQL    bool
+	limit      int      // rows (or pages for an API) to fetch, in batches
+	total      int      // rows the query returns in all; -1 unknown
+	counted    string   // query total was counted for
+	complete   bool     // every row is loaded: m has nothing to add
+	parents    string   // for_each: parents the preview ran for, "3 of 10 users"
+	parentCols []string // for_each: the parent's columns, from the last preview
+	anchor     bool     // next result starts at the first row
+	args       []any    // arguments of compiled
+	shown      string   // the query a run sends, ticks included, arguments inlined
+	shownSeq   int
+	wm         *watermarkInfo // incremental streams: the bound a run starts from
+	respKeys   []apiKey       // api: top-level keys of the response, for the endpoint form
+	srcPK      []string       // primary key of the previewed table
+	pkFor      string         // table srcPK was read for
+	natural    []int          // per-column width, measured once per fetch
+	widths     map[string]int // per-column width overrides
+	wide       bool           // no width cap
+	showVal    bool           // full value of the current cell
+	showCols   bool           // schema: every column, its type and first value
 
 	// bookmarks: saved queries on this connection
 	marks    []*config.Bookmark

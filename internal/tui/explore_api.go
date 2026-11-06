@@ -136,7 +136,7 @@ func (e *explorer) apiFetch(spec config.Stream, n int) func() previewMsg {
 		if parent != nil {
 			var s forEachResult
 			s, err = forEachRun(ctx, client, spec, *parent, n, &keys)
-			recs, msg.Parents, msg.Complete = s.recs, s.parents, s.complete
+			recs, msg.Parents, msg.Complete, msg.ParentCols = s.recs, s.parents, s.complete, s.parentCols
 		} else {
 			pages := 0
 			recs, err = client.FetchWith(ctx, &spec, api.Options{Vars: vars, MaxPages: n, Keys: &keys, OnPage: func(int) { pages++ }})
@@ -202,26 +202,28 @@ const forEachParents = 3 // parents a for_each preview runs for, per batch
 // forEachResult is a for_each sample: the records, how many parents it ran for of how
 // many, and whether that was all.
 type forEachResult struct {
-	recs     []api.Record
-	parents  string
-	complete bool
-}
-
-// forEachSample fetches the parent's first page, then the child for its first records.
-func forEachSample(ctx context.Context, client *api.Client, spec, parent config.Stream, n int) ([]api.Record, error) {
-	r, err := forEachRun(ctx, client, spec, parent, n, nil)
-	return r.recs, err
+	recs       []api.Record
+	parents    string
+	parentCols []string // the parent's record keys, in response order
+	complete   bool
 }
 
 // forEachRun fetches the parent's first page, then the child for its first records:
 // three parents per batch. keys collects the record keys in response order.
 func forEachRun(ctx context.Context, client *api.Client, spec, parent config.Stream, n int, keys *[]string) (forEachResult, error) {
 	parentPages := 0
-	parents, err := client.FetchWith(ctx, &parent, api.Options{MaxPages: 1, OnPage: func(int) { parentPages++ }})
+	var out forEachResult
+	parents, err := client.FetchWith(ctx, &parent, api.Options{MaxPages: 1, Keys: &out.parentCols, OnPage: func(int) { parentPages++ }})
 	if err != nil {
 		return forEachResult{}, fmt.Errorf("for_each %s: %w", spec.ForEach, err)
 	}
-	var out forEachResult
+	if len(parents) > 0 {
+		cols, _ := engine.Tabulate(parents, out.parentCols...)
+		out.parentCols = out.parentCols[:0]
+		for _, c := range cols {
+			out.parentCols = append(out.parentCols, c.Name)
+		}
+	}
 	tried, more := 0, false
 	for _, p := range parents {
 		if tried == forEachParents*n || len(out.recs) >= previewLimit*n {

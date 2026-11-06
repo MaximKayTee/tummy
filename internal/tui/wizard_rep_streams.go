@@ -276,8 +276,10 @@ func (w *repWizard) sample() tea.Cmd {
 			return sampleMsg{Err: err}
 		}
 		var recs []api.Record
+		var sample forEachResult
 		if parent != nil {
-			recs, err = forEachSample(ctx, client, spec, *parent, 1)
+			sample, err = forEachRun(ctx, client, spec, *parent, 1, nil)
+			recs = sample.recs
 		} else {
 			recs, err = client.FetchWith(ctx, &spec, api.Options{MaxPages: 1})
 		}
@@ -285,7 +287,7 @@ func (w *repWizard) sample() tea.Cmd {
 			return sampleMsg{Err: err}
 		}
 		cols, _ := engine.Tabulate(recs)
-		return sampleMsg{Cols: cols, Records: len(recs)}
+		return sampleMsg{Cols: cols, Records: len(recs), Parent: spec.ForEach, ParentCols: sample.parentCols}
 	}
 }
 

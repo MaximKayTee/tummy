@@ -58,9 +58,11 @@ type tableColsMsg struct {
 
 // sampleMsg carries the columns of an API stream's first page.
 type sampleMsg struct {
-	Cols    []db.Column
-	Records int
-	Err     error
+	Cols       []db.Column
+	Records    int
+	Parent     string   // for_each: the parent stream
+	ParentCols []string // for_each: its columns
+	Err        error
 }
 
 // discoverTables lists every table of every schema of a connection.
@@ -140,7 +142,8 @@ type repWizard struct {
 	colsErr    string
 	colsSeen   map[string][]db.Column // columns of source tables read so far
 	colsAsked  bool
-	sampling   bool // fetching an API stream's first page
+	sampling   bool                // fetching an API stream's first page
+	parentCols map[string][]string // columns of for_each parents sampled so far
 
 	child      *connWizard // new connection from the source or target list
 	explore    *explorer   // a draft stream opened on its data: sql, columns, steps
@@ -513,6 +516,12 @@ func (w *repWizard) own(msg tea.Msg) (wizResult, tea.Cmd) {
 			return wizContinue, nil
 		}
 		sd, _ := w.formStream()
+		if msg.Parent != "" {
+			if w.parentCols == nil {
+				w.parentCols = map[string][]string{}
+			}
+			w.parentCols[msg.Parent] = msg.ParentCols
+		}
 		names := make([]string, len(msg.Cols))
 		kinds := map[string]db.Kind{}
 		for i, c := range msg.Cols {
