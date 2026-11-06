@@ -375,12 +375,7 @@ func (m Model) forgetRuns(rep, stream string) tea.Cmd {
 func (m Model) deleteBookmark(name string) tea.Cmd {
 	home := m.opts.Home
 	return func() tea.Msg {
-		all, err := config.LoadBookmarks(config.BookmarksPath(home))
-		if err != nil {
-			return statusMsg{Text: err.Error(), IsErr: true}
-		}
-		delete(all.Bookmark, name)
-		if err := config.WriteBookmarks(all.Path, all); err != nil {
+		if _, err := config.EditBookmarks(home, func(all *config.Bookmarks) error { delete(all.Bookmark, name); return nil }); err != nil {
 			return statusMsg{Text: err.Error(), IsErr: true}
 		}
 		return deletedMsg{Text: "deleted bookmark " + name}
@@ -402,13 +397,5 @@ func (m Model) forgetRun(run state.Run) tea.Cmd {
 		return deletedMsg{Text: "forgot run of " + run.Stream + " " + run.Started.Local().Format("2006-01-02 15:04")}
 	}
 }
-
-// firstOf is cmp.Or.
-//
-// Deprecated: use cmp.Or.
-
-// redact is config.Redact.
-//
-// Deprecated: use config.Redact or (*config.Conn).Target.
 
 func userHome() (string, error) { return os.UserHomeDir() }

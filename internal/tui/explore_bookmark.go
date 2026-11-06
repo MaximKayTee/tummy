@@ -26,21 +26,28 @@ func (e *explorer) loadMarks() error {
 	return nil
 }
 
-// canBookmark: a table or query preview with rows, not an api endpoint.
-func (e *explorer) canBookmark() bool {
-	return e.steppable() && len(e.cols) > 0 && !e.editSQL
+// canBookmark: B is offered.
+func (e *explorer) canBookmark() bool { return e.bookmarkable() == "" }
+
+// bookmarkable: why the preview cannot be bookmarked, or "".
+func (e *explorer) bookmarkable() string {
+	switch {
+	case !e.steppable():
+		return "not for api"
+	case len(e.cols) == 0:
+		return "no preview"
+	case e.editSQL:
+		return "run the sql first"
+	case e.spec.Where != "" || len(e.spec.Select) > 0 || e.spec.Range != "":
+		return "stream has where, select or range: bookmark its target data"
+	}
+	return ""
 }
 
 // saveBookmark is B: a known bookmark is rewritten, anything else asks for a name.
 func (e *explorer) saveBookmark() tea.Cmd {
-	switch {
-	case !e.canBookmark():
-		if e.steppable() && len(e.cols) == 0 {
-			e.setNote("no preview", true)
-		}
-		return nil
-	case e.spec.Where != "" || len(e.spec.Select) > 0 || e.spec.Range != "":
-		e.setNote("stream has where, select or range: bookmark its target data", true)
+	if why := e.bookmarkable(); why != "" {
+		e.setNote(why, true)
 		return nil
 	}
 	if e.bookmark != "" {
@@ -53,7 +60,7 @@ func (e *explorer) saveBookmark() tea.Cmd {
 }
 
 func (e *explorer) toBookmarkForm() tea.Cmd {
-	if !e.canBookmark() || e.spec.Where != "" || len(e.spec.Select) > 0 || e.spec.Range != "" {
+	if e.bookmarkable() != "" {
 		return e.saveBookmark() // the note
 	}
 	def := e.bookmark
@@ -92,25 +99,24 @@ func (e *explorer) defaultBookmarkName() string {
 }
 
 // writeBookmark saves the preview as bookmark name: the table or sql, the steps with the
-// ticks as a trailing keep, and the stream whose target it is. The preview then saves
-// to that bookmark.
+// ticks as a trailing keep, and the stream it was opened from. A bookmark opened and
+// saved again keeps its stream. The preview then saves to that bookmark.
 func (e *explorer) writeBookmark(name string) error {
 	p, err := e.finalSteps(e.tickedCols())
 	if err != nil {
 		return err
 	}
-	bm := config.Bookmark{Name: name, Conn: e.conn.Name, SQL: e.spec.SQL, Steps: renderSteps(p), Rep: e.onRep, Stream: e.onStream}
+	bm := config.Bookmark{Name: name, Conn: e.conn.Name, SQL: e.spec.SQL, Steps: renderSteps(p), Rep: e.repName, Stream: e.streamName}
 	if bm.SQL == "" {
 		bm.Table = e.table
 	}
-	all, err := config.LoadBookmarks(config.BookmarksPath(e.opts.Home))
+	all, err := config.EditBookmarks(e.opts.Home, func(all *config.Bookmarks) error {
+		if old := all.Bookmark[name]; old != nil && e.bookmark == name {
+			bm.Rep, bm.Stream = old.Rep, old.Stream
+		}
+		return all.Set(bm)
+	})
 	if err != nil {
-		return err
-	}
-	if err := all.Set(bm); err != nil {
-		return err
-	}
-	if err := config.WriteBookmarks(all.Path, all); err != nil {
 		return err
 	}
 	e.marks = all.For(e.conn.Name)
@@ -131,7 +137,6 @@ func (e *explorer) loadBookmark(b *config.Bookmark) {
 	e.resetPreview()
 	e.table, e.streamName = "", ""
 	e.openSpec(b.Table, config.Stream{SQL: b.SQL, Steps: b.Steps})
-	e.onRep, e.onStream = b.Rep, b.Stream
 	e.bookmark = b.Name
 	e.page = pagePreview
 }
@@ -148,12 +153,8 @@ func newBookmarkExplorer(opts Options, b *config.Bookmark) (*explorer, error) {
 }
 
 func (e *explorer) deleteBookmark(name string) error {
-	all, err := config.LoadBookmarks(config.BookmarksPath(e.opts.Home))
+	all, err := config.EditBookmarks(e.opts.Home, func(all *config.Bookmarks) error { delete(all.Bookmark, name); return nil })
 	if err != nil {
-		return err
-	}
-	delete(all.Bookmark, name)
-	if err := config.WriteBookmarks(all.Path, all); err != nil {
 		return err
 	}
 	e.marks = all.For(e.conn.Name)

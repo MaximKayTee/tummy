@@ -11,7 +11,7 @@ func execOnce(t *testing.T, e *explorer, stmt string) execMsg {
 	t.Helper()
 	e.sqlInput.SetValue(stmt)
 	_, cmd := e.update(keyCtrlE)
-	if cmd == nil || !e.execBusy {
+	if cmd == nil || e.busy != "executing" {
 		t.Fatalf("no execute for %q", stmt)
 	}
 	msg, ok := cmd().(execMsg)
@@ -33,7 +33,7 @@ func TestExecuteStatement(t *testing.T) {
 		t.Fatalf("footer: %v", f)
 	}
 	execOnce(t, e, "create table t2 (a int)")
-	if !e.editSQL || e.currentNote() != "0 rows affected  "+strings.TrimPrefix(e.currentNote(), "0 rows affected  ") || e.execBusy {
+	if !e.editSQL || e.currentNote() != "0 rows affected  "+strings.TrimPrefix(e.currentNote(), "0 rows affected  ") || e.busy != "" {
 		t.Fatalf("note=%q editSQL=%v", e.currentNote(), e.editSQL)
 	}
 	execOnce(t, e, "insert into t2 values (1),(2)")
@@ -86,7 +86,7 @@ func TestDropTableFromList(t *testing.T) {
 		t.Fatalf("mismatch accepted: page=%d err=%q", e.page, e.dropForm.field("name").err)
 	}
 	e.update(keyEsc)
-	if e.page != pageTables || e.execBusy {
+	if e.page != pageTables || e.busy != "" {
 		t.Fatal("esc backs out")
 	}
 	e.update(keyRunes("D"))
@@ -128,7 +128,7 @@ func TestDropTableFromPreview(t *testing.T) {
 	if e.page != pagePreview {
 		t.Fatalf("page=%d", e.page)
 	}
-	if v := strings.Join(e.view(100, 24), "\n"); !strings.Contains(v, "◐ executing") {
+	if v := strings.Join(e.view(100, 24), "\n"); !strings.Contains(v, "◐ dropping things") {
 		t.Fatalf("head:\n%s", v)
 	}
 	_, cmd = e.update(cmd())

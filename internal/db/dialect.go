@@ -58,9 +58,6 @@ type Dialect interface {
 	// OrderLimit adds ordering and a row cap to a complete SELECT. order is rendered
 	// ("\"a\" DESC, \"b\""); either may be empty.
 	OrderLimit(sql, order string, n int) string
-	// Limit is OrderLimit(sql, "", n).
-	//
-	// Deprecated: use OrderLimit.
 	// Derived makes a complete SELECT legal as a derived table.
 	Derived(sql string) string
 

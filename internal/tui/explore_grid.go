@@ -794,7 +794,7 @@ func (e *explorer) previewHead(width int) string {
 	if e.sample {
 		parts = append(parts, sWarn.Render("source sample"))
 	}
-	if e.onStream != "" {
+	if e.fromStream {
 		parts = append(parts, sDim.Render(e.conn.Name))
 	}
 	if e.bookmark != "" {
@@ -805,10 +805,8 @@ func (e *explorer) previewHead(width int) string {
 		parts = append(parts, sWarn.Render("◐ more"))
 	case e.stepWait >= 0:
 		parts = append(parts, sWarn.Render(fmt.Sprintf("◐ step %d", e.stepWait+1)))
-	case e.execBusy:
-		parts = append(parts, sWarn.Render("◐ executing"))
-	case e.benching:
-		parts = append(parts, sWarn.Render("◐ full run"))
+	case e.busy != "":
+		parts = append(parts, sWarn.Render("◐ "+txt.Clean(e.busy)))
 	case e.benchText != "":
 		parts = append(parts, sDim.Render(e.benchText))
 	}

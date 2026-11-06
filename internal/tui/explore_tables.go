@@ -189,9 +189,7 @@ func (e *explorer) resetPreview() {
 	e.baseSteps, e.baseSQL, e.tickBase = "", "", ""
 	e.limit, e.total, e.counted, e.complete, e.parents = 1, -1, "", false, ""
 	e.fresh, e.anchor, e.discarded, e.wm = true, false, false, nil
-	e.bookmark, e.onRep, e.onStream = "", "", ""
-	e.benching, e.benchText = false, ""
-	e.execBusy = false
+	e.bookmark, e.benchText = "", ""
 }
 
 // openSpec takes a stream's settings: its steps become the pipeline, and without steps

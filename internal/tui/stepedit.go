@@ -380,8 +380,9 @@ func (e *stepEditor) update(msg tea.KeyMsg) (formResult, tea.Cmd) {
 }
 
 // valueKeys: in the open value list, space ticks until text is typed, then types; tab
-// always ticks. With = and != a second value switches to in and not in; the other
-// operators take one value, so a tick replaces the last.
+// always ticks; enter on a typed search ticks the row and closes. With = and != a second
+// value switches to in and not in; the other operators take one value, so a tick
+// replaces the last.
 func (e *stepEditor) valueKeys(msg tea.KeyMsg) (formResult, tea.Cmd, bool) {
 	d := e.valueDrop()
 	if d == nil {
@@ -408,6 +409,13 @@ func (e *stepEditor) valueKeys(msg tea.KeyMsg) (formResult, tea.Cmd, bool) {
 			d.cur = max(slices.Index(d.visible(), it), 0)
 		}
 		return formContinue, nil, true
+	case "enter":
+		// typed a search and ticked nothing: enter takes the row, under the same rule
+		if !d.changed() && strings.TrimSpace(d.filter.Value()) != "" {
+			if it, ok := d.current(); ok && !d.selected[it] {
+				e.tickValue(d)
+			}
+		}
 	case "ctrl+a":
 		if singleOp(e.form.get("op")) {
 			return formContinue, nil, true

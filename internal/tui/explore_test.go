@@ -283,7 +283,7 @@ func TestEnterShowsTargetData(t *testing.T) {
 	m = loaded(t, opts)
 	m = press(m, "enter", "enter") // alpha › things › data
 	e, ok := m.wiz.(*explorer)
-	if !ok || e.table != "things" || e.conn.Name != "TGT" || e.onRep != "alpha" || e.onStream != "things" {
+	if !ok || e.table != "things" || e.conn.Name != "TGT" || e.repName != "alpha" || e.streamName != "things" {
 		t.Fatalf("enter should open the target table: %+v", m.wiz)
 	}
 	run(e, e.start())
@@ -923,6 +923,34 @@ func TestGuidedFilterEditor(t *testing.T) {
 	ed = newStepEditor("filter", ctx, &ed.result)
 	if got := ed.form.picked("val"); len(got) != 2 {
 		t.Fatalf("prefill: %v", got)
+	}
+	// editing "id" = 1: typing a second value and pressing enter switches to in
+	ed = newStepEditor("filter", ctx, &steps.Step{Op: "filter", Args: `"id" = 1`})
+	ed.update(keyDown) // col
+	ed.update(keyDown) // op
+	ed.update(keyDown) // value
+	ed.update(keyRunes("2"))
+	if ed.form.drop == nil {
+		t.Fatal("typing opens the value list")
+	}
+	ed.update(keyEnter)
+	if got := ed.form.picked("val"); ed.form.get("op") != "in" || len(got) != 2 {
+		t.Fatalf("enter on a typed second value: op=%q vals=%v", ed.form.get("op"), got)
+	}
+	ed.update(keySave)
+	if ed.result.String() != `filter "id" IN (1, 2)` {
+		t.Fatalf("saved: %s err=%q", ed.result, ed.form.field("val").err)
+	}
+	// editing "id" > 1: the typed value replaces the old one
+	ed = newStepEditor("filter", ctx, &steps.Step{Op: "filter", Args: `"id" > 1`})
+	ed.update(keyDown)
+	ed.update(keyDown)
+	ed.update(keyDown)
+	ed.update(keyRunes("3"))
+	ed.update(keyEnter)
+	ed.update(keySave)
+	if ed.result.String() != `filter "id" > 3` {
+		t.Fatalf("replace: %s err=%q vals=%v", ed.result, ed.form.field("val").err, ed.form.picked("val"))
 	}
 	// > needs one value
 	ed = newStepEditor("filter", ctx, nil)

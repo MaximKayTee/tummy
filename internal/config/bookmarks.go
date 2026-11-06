@@ -130,6 +130,18 @@ func (b *Bookmarks) Set(bm Bookmark) error {
 	return nil
 }
 
+// EditBookmarks loads HOME/bookmarks.toml, applies change and writes it back.
+func EditBookmarks(home string, change func(*Bookmarks) error) (*Bookmarks, error) {
+	b, err := LoadBookmarks(BookmarksPath(home))
+	if err != nil {
+		return nil, err
+	}
+	if err := change(b); err != nil {
+		return nil, err
+	}
+	return b, WriteBookmarks(b.Path, b)
+}
+
 // WriteBookmarks writes every bookmark, patching the existing file so comments, blank
 // lines and ordering are kept. A new file is created 0600.
 func WriteBookmarks(path string, b *Bookmarks) error {

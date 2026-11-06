@@ -140,20 +140,14 @@ type explorer struct {
 	marks    []*config.Bookmark
 	bookmark string // the bookmark the preview was opened from or saved as
 	markForm *form
-	onRep    string // the stream whose target table is previewed
-	onStream string
 
-	// statements: execute from the sql editor, drop table
-	execBusy  bool
-	execSeq   int
+	// statements off the preview: full run, execute, drop table; one at a time
+	busy      string // what is running, for the head; "" when idle
+	busySeq   int
+	benchText string // the last full run: rows and time
 	dropTable string
 	dropForm  *form
 	dropFrom  explorePage // page to return to
-
-	// full run: the query as compiled, every row read and dropped, timed
-	benching  bool
-	benchSeq  int
-	benchText string
 
 	// add to replication
 	repPick  *form
@@ -292,7 +286,6 @@ func newRepStreamExplorer(opts Options, rep, connName string, s config.ResolvedS
 	e.fromStream = true
 	e.streamName = s.Name
 	e.openSpec(s.Name, spec)
-	e.onRep, e.onStream = e.repName, s.Name
 	e.page = pagePreview
 	return e, nil
 }
@@ -332,7 +325,7 @@ func newWildcardExplorer(opts Options, rep, connName string, s config.ResolvedSt
 }
 
 // newTargetExplorer shows the rows stream of rep loaded into its target table object.
-// Steps apply on top; ctrl+s bookmarks them.
+// Steps apply on top; B bookmarks them under the stream.
 func newTargetExplorer(opts Options, rep, stream, connName, object string) (*explorer, error) {
 	e, err := newExplorer(opts, connName)
 	if err != nil {
@@ -341,7 +334,7 @@ func newTargetExplorer(opts Options, rep, stream, connName, object string) (*exp
 	e.table = object
 	e.page = pagePreview
 	e.fromStream = true
-	e.onRep, e.onStream = rep, stream
+	e.repName, e.streamName = rep, stream
 	return e, nil
 }
 
@@ -596,9 +589,6 @@ func (e *explorer) dispatch(msg tea.Msg) (wizResult, tea.Cmd) {
 		return wizContinue, e.applyPreview(msg)
 	case prefixMsg:
 		return wizContinue, e.applyPrefix(msg)
-	case benchMsg:
-		e.applyBench(msg)
-		return wizContinue, nil
 	case execMsg:
 		return wizContinue, e.applyExec(msg)
 	case shownMsg:

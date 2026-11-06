@@ -210,7 +210,7 @@ func TestBenchRunsFull(t *testing.T) {
 	e.pipeline = append(e.pipeline, parseOne(t, "filter id > 1"))
 	press1(e, keyRunes("R"))
 	_, cmd := e.update(keyRunes("b"))
-	if cmd == nil || !e.benching {
+	if cmd == nil || e.busy != "full run" {
 		t.Fatal("b runs")
 	}
 	if v := strings.Join(e.view(100, 20), "\n"); !strings.Contains(v, "◐ full run") {
@@ -219,9 +219,9 @@ func TestBenchRunsFull(t *testing.T) {
 	if _, again := e.update(keyRunes("b")); again != nil {
 		t.Fatal("one at a time")
 	}
-	msg := cmd().(benchMsg)
+	msg := cmd().(execMsg)
 	e.update(msg)
-	if e.benching || !strings.HasPrefix(e.benchText, "full 2 rows  ") {
+	if e.busy != "" || !strings.HasPrefix(e.benchText, "full 2 rows  ") {
 		t.Fatalf("bench: %q", e.benchText)
 	}
 	if v := strings.Join(e.view(100, 20), "\n"); !strings.Contains(v, "full 2 rows") {
@@ -233,7 +233,7 @@ func TestBenchRunsFull(t *testing.T) {
 		t.Fatal("stale bench kept")
 	}
 	// an error lands as a note
-	e.update(benchMsg{seq: e.benchSeq, err: os.ErrClosed})
+	e.update(execMsg{seq: e.busySeq, kind: "bench", err: os.ErrClosed})
 	if e.currentNote() == "" {
 		t.Fatal("error note")
 	}
