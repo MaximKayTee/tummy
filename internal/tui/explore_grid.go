@@ -24,15 +24,15 @@ import (
 type previewMsg struct {
 	Cols       []db.Column
 	Rows       [][]any
-	SQL        string     // query sent, database sources
-	Args       []any      // its arguments
-	Steps      [][]string // columns each step sees
-	Total      int        // rows the query returns in all; -1 unknown
-	Counted    string     // query Total was counted for
-	Complete   bool       // no rows beyond these
-	Parents    string     // for_each: "3 of 10 users"
-	ParentCols []string   // for_each: the parent's columns
-	Keys       []apiKey   // api: top-level keys of the response
+	SQL        string         // query sent, database sources
+	Args       []any          // its arguments
+	Steps      [][]string     // columns each step sees
+	Total      int            // rows the query returns in all; -1 unknown
+	Counted    string         // query Total was counted for
+	Complete   bool           // no rows beyond these
+	Parents    string         // for_each: "3 of 10 users"
+	ParentCols *parentColsMsg // for_each: the parent's columns
+	Keys       []apiKey       // api: top-level keys of the response
 	WM         *watermarkInfo
 	PK         []string
 	PKFor      string
@@ -400,9 +400,9 @@ func (e *explorer) applyPreview(msg previewMsg) tea.Cmd {
 		curName = e.cols[e.colCur].Name
 	}
 	e.cols, e.rows, e.fetchErr = msg.Cols, msg.Rows, ""
-	e.total, e.counted, e.complete, e.parents = msg.Total, msg.Counted, msg.Complete, msg.Parents
+	e.total, e.counted, e.complete, e.parentsNote = msg.Total, msg.Counted, msg.Complete, msg.Parents
 	if msg.ParentCols != nil {
-		e.parentCols = msg.ParentCols
+		e.parents.set(*msg.ParentCols)
 	}
 	if e.page == pageEndpoint {
 		e.page = pagePreview // errors stay on the endpoint form
@@ -826,8 +826,8 @@ func (e *explorer) previewHead(width int) string {
 	}
 	if len(e.cols) > 0 {
 		parts = append(parts, sDim.Render(e.rowsText()))
-		if e.parents != "" {
-			parts = append(parts, sDim.Render(e.parents))
+		if e.parentsNote != "" {
+			parts = append(parts, sDim.Render(e.parentsNote))
 		}
 		parts = append(parts, sDim.Render(fmt.Sprintf("%d/%d columns", len(e.tickedCols()), len(e.cols))))
 	}

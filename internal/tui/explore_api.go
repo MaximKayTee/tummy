@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+
+	tea "github.com/charmbracelet/bubbletea"
 	"sort"
 	"strconv"
 	"strings"
@@ -136,7 +138,10 @@ func (e *explorer) apiFetch(spec config.Stream, n int) func() previewMsg {
 		if parent != nil {
 			var s forEachResult
 			s, err = forEachRun(ctx, client, spec, *parent, n, &keys)
-			recs, msg.Parents, msg.Complete, msg.ParentCols = s.recs, s.parents, s.complete, s.parentCols
+			recs, msg.Parents, msg.Complete = s.recs, s.parents, s.complete
+			if len(s.parentCols) > 0 {
+				msg.ParentCols = &parentColsMsg{Parent: spec.ForEach, Cols: s.parentCols}
+			}
 		} else {
 			pages := 0
 			recs, err = client.FetchWith(ctx, &spec, api.Options{Vars: vars, MaxPages: n, Keys: &keys, OnPage: func(int) { pages++ }})
@@ -160,6 +165,72 @@ func (e *explorer) apiFetch(spec config.Stream, n int) func() previewMsg {
 		msg.Cols, msg.Rows = engine.Tabulate(recs, append(keys, addedKeys(spec.AddColumns)...)...)
 		return msg
 	}
+}
+
+// parentColsMsg carries a for_each parent's columns, from its first page.
+type parentColsMsg struct {
+	Parent string
+	Cols   []string
+	Err    error
+}
+
+// parentColumns reads the parent's first page for its columns.
+func parentColumns(conn *config.Conn, name string, parent config.Stream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		client, err := api.NewClient(conn)
+		if err != nil {
+			return parentColsMsg{Parent: name, Err: err}
+		}
+		var keys []string
+		recs, err := client.FetchWith(ctx, &parent, api.Options{MaxPages: 1, Keys: &keys})
+		if err != nil {
+			return parentColsMsg{Parent: name, Err: err}
+		}
+		cols, _ := engine.Tabulate(recs, keys...)
+		names := make([]string, len(cols))
+		for i, c := range cols {
+			names[i] = c.Name
+		}
+		return parentColsMsg{Parent: name, Cols: names}
+	}
+}
+
+// parentCache holds the columns of for_each parents read so far, and the one being read.
+type parentCache struct {
+	cols    map[string][]string
+	pending string
+}
+
+func (c *parentCache) get(f *form) []string { return c.cols[f.get("for_each")] }
+
+func (c *parentCache) set(msg parentColsMsg) {
+	if c.pending == msg.Parent {
+		c.pending = ""
+	}
+	if c.cols == nil {
+		c.cols = map[string][]string{}
+	}
+	c.cols[msg.Parent] = msg.Cols
+	if c.cols[msg.Parent] == nil {
+		c.cols[msg.Parent] = []string{} // read once; an error is shown, not retried per key
+	}
+}
+
+// want starts a read of the form's for_each parent when its columns are unknown. The
+// parent is looked up in the draft's streams.
+func (c *parentCache) want(f *form, conn *config.Conn, streams []config.StreamDraft) tea.Cmd {
+	name := f.get("for_each")
+	if name == "" || c.cols[name] != nil || c.pending == name {
+		return nil
+	}
+	i := slices.IndexFunc(streams, func(o config.StreamDraft) bool { return o.Name == name })
+	if i < 0 {
+		return nil
+	}
+	c.pending = name
+	return parentColumns(conn, name, streams[i].Stream)
 }
 
 // addedKeys are the add_columns names, sorted.

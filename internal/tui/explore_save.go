@@ -298,7 +298,7 @@ func (e *explorer) streamForm(title, name string, s config.Stream) *form {
 		}
 	}
 	fields := []*field{text("name", "Name", "users   the target table unless object is set").def(name).required()}
-	for _, fl := range streamFieldsOf(s, base, kinds, e.parentCols, e.isAPI) {
+	for _, fl := range streamFieldsOf(s, base, kinds, e.parents.get, e.isAPI) {
 		switch fl.Key {
 		case "object":
 			opts := []string{""}

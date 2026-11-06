@@ -37,7 +37,7 @@ func (w *repWizard) streamFormKinds(sd config.StreamDraft, cols []string, kinds 
 		w.colsSeen[sd.Name] = seen
 	}
 	api := w.isAPI()
-	fs := streamFieldsOf(sd.Stream, cols, kinds, w.parentCols[sd.Stream.ForEach], api)
+	fs := streamFieldsOf(sd.Stream, cols, kinds, w.parents.get, api)
 	var name *field
 	if api {
 		name = text("name", "Name", "the target table unless object is set").eg("users").def(sd.Name)
@@ -80,30 +80,19 @@ func (w *repWizard) streamFormKinds(sd config.StreamDraft, cols []string, kinds 
 	return f
 }
 
-// addColumnsField picks parent columns to copy under their own name once the parent's
-// columns are known; other entries stay as "col = {parent.field}" items. Before that it
-// is the pairs typed.
-func addColumnsField(s config.Stream, parentCols []string) *field {
-	withParent := func(f *form) bool { return f.get("for_each") != "" }
-	if len(parentCols) == 0 {
-		return text("add_columns", "Add columns", "").def(pairs(s.AddColumns)).check(checkPairs).when(withParent).helpFn(func(f *form) string {
-			if f.get("add_columns") != "" {
-				return ""
-			}
-			p := f.get("for_each")
-			return strings.TrimSuffix(p, "s") + "_id = {" + p + ".id}"
-		})
-	}
+// addColumnsField picks parent columns to copy under their own name; other entries
+// are "col = {parent.field}" items, typed or kept.
+func addColumnsField(s config.Stream, parentCols func(*form) []string) *field {
 	var picked []string
 	for _, col := range slices.Sorted(maps.Keys(s.AddColumns)) {
 		tmpl := s.AddColumns[col]
-		if tmpl == "{"+s.ForEach+"."+col+"}" && slices.Contains(parentCols, col) {
+		if tmpl == "{"+s.ForEach+"."+col+"}" {
 			picked = append(picked, col)
 		} else {
 			picked = append(picked, col+" = "+tmpl)
 		}
 	}
-	return multi("add_columns", "Add columns", "parent columns; or col = {parent.field}", parentCols, picked).when(withParent)
+	return multi("add_columns", "Add columns", "parent columns; or col = {parent.field}", nil, picked).optsFn(parentCols).when(func(f *form) bool { return f.get("for_each") != "" })
 }
 
 // addColumnsPicked reads the add_columns picker: a column copies the parent's field of
@@ -175,7 +164,10 @@ func kindNotes(kinds map[string]db.Kind) map[string]string {
 // streamFieldsOf is streamFields with the kinds of the columns, so key lists offer only
 // loaded columns an update key can compare, and the for_each parent's columns for the
 // keys that name them.
-func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, parentCols []string, api bool) []*field {
+func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, parentCols func(*form) []string, api bool) []*field {
+	if parentCols == nil {
+		parentCols = func(*form) []string { return nil }
+	}
 	in := func(key string, vals ...string) func(*form) bool {
 		return func(f *form) bool { return slices.Contains(vals, f.get(key)) }
 	}
@@ -201,7 +193,7 @@ func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, pa
 			choice("for_each", "For each", "parent stream: one request per record, {parent.field}", cmp.Or(s.ForEach, "")).empty("none").def(s.ForEach),
 			addColumnsField(s, parentCols),
 			combo("skip_existing", "Skip existing", "target column; parents already loaded are skipped", append([]string{""}, cols...)...).empty("none").eg("product_id").def(s.SkipExisting).when(func(f *form) bool { return f.get("for_each") != "" }),
-			combo("for_each_since", "For each since", "parent field, lower bound; Nd = days ago", sinceOptions(parentCols)...).empty("none").eg("created_at, 2026-01-01   created_at, 30d").def(s.ForEachSince).when(func(f *form) bool { return f.get("for_each") != "" }).check(func(v string) error {
+			combo("for_each_since", "For each since", "parent field, lower bound; Nd = days ago", "").empty("none").optsFn(func(f *form) []string { return sinceOptions(parentCols(f)) }).eg("created_at, 2026-01-01   created_at, 30d").def(s.ForEachSince).when(func(f *form) bool { return f.get("for_each") != "" }).check(func(v string) error {
 				if v == "" {
 					return nil
 				}

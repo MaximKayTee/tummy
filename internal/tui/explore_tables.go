@@ -187,7 +187,7 @@ func (e *explorer) resetPreview() {
 	e.fetchErr, e.note, e.noteErr, e.showVal = "", "", false, false
 	e.wantSelect, e.origSelect, e.stepsErr = nil, nil, ""
 	e.baseSteps, e.baseSQL, e.tickBase = "", "", ""
-	e.limit, e.total, e.counted, e.complete, e.parents = 1, -1, "", false, ""
+	e.limit, e.total, e.counted, e.complete, e.parentsNote = 1, -1, "", false, ""
 	e.fresh, e.anchor, e.discarded, e.wm = true, false, false, nil
 	e.bookmark, e.benchText = "", ""
 }

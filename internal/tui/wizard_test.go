@@ -1438,7 +1438,7 @@ func run2(w wizard, cmd tea.Cmd) {
 
 func TestAddColumnsPicker(t *testing.T) {
 	s := config.Stream{ForEach: "files", AddColumns: map[string]string{"fileID": "{files.fileID}", "owner": "{files.user_name}"}}
-	fl := addColumnsField(s, []string{"fileID", "created"})
+	fl := addColumnsField(s, nil)
 	if fl.Kind != kindMulti || !fl.Picked["fileID"] || !fl.Picked["owner = {files.user_name}"] {
 		t.Fatalf("picked: %v", fl.Picked)
 	}
@@ -1446,8 +1446,5 @@ func TestAddColumnsPicker(t *testing.T) {
 	want := map[string]string{"created": "{files.created}", "owner": "{files.user_name}"}
 	if !maps.Equal(got, want) {
 		t.Fatalf("got %v", got)
-	}
-	if addColumnsField(s, nil).Kind != kindText {
-		t.Fatal("no parent columns: typed pairs")
 	}
 }

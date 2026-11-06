@@ -206,6 +206,11 @@ func (w *repWizard) keyStream(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		return wizContinue, w.sample()
 	}
 	res, cmd := w.stream.update(msg)
+	if w.isAPI() {
+		if c, err := w.conns.Get(w.draft.Source); err == nil {
+			cmd = tea.Batch(cmd, w.parents.want(w.stream, c, w.draft.Streams))
+		}
+	}
 	switch res {
 	case formCancel:
 		if w.entry != entryFull {
@@ -287,7 +292,11 @@ func (w *repWizard) sample() tea.Cmd {
 			return sampleMsg{Err: err}
 		}
 		cols, _ := engine.Tabulate(recs)
-		return sampleMsg{Cols: cols, Records: len(recs), Parent: spec.ForEach, ParentCols: sample.parentCols}
+		msg := sampleMsg{Cols: cols, Records: len(recs)}
+		if len(sample.parentCols) > 0 {
+			msg.Parent = &parentColsMsg{Parent: spec.ForEach, Cols: sample.parentCols}
+		}
+		return msg
 	}
 }
 

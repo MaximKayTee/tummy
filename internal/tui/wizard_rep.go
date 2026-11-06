@@ -58,11 +58,10 @@ type tableColsMsg struct {
 
 // sampleMsg carries the columns of an API stream's first page.
 type sampleMsg struct {
-	Cols       []db.Column
-	Records    int
-	Parent     string   // for_each: the parent stream
-	ParentCols []string // for_each: its columns
-	Err        error
+	Cols    []db.Column
+	Records int
+	Parent  *parentColsMsg // for_each: the parent's columns
+	Err     error
 }
 
 // discoverTables lists every table of every schema of a connection.
@@ -142,8 +141,8 @@ type repWizard struct {
 	colsErr    string
 	colsSeen   map[string][]db.Column // columns of source tables read so far
 	colsAsked  bool
-	sampling   bool                // fetching an API stream's first page
-	parentCols map[string][]string // columns of for_each parents sampled so far
+	sampling   bool        // fetching an API stream's first page
+	parents    parentCache // columns of for_each parents read so far
 
 	child      *connWizard // new connection from the source or target list
 	explore    *explorer   // a draft stream opened on its data: sql, columns, steps
@@ -434,7 +433,7 @@ func (w *repWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 		if msg.For != "" { // an explorer's lists have no role
 			return w.listed(msg)
 		}
-	case columnsMsg, tableColsMsg, sampleMsg:
+	case columnsMsg, tableColsMsg, sampleMsg, parentColsMsg:
 		return w.own(msg)
 	}
 	if w.child != nil {
@@ -506,6 +505,12 @@ func (w *repWizard) own(msg tea.Msg) (wizResult, tea.Cmd) {
 		}
 		maps.Copy(w.colsSeen, msg.Cols)
 		return wizContinue, nil
+	case parentColsMsg:
+		w.parents.set(msg)
+		if w.stream != nil && msg.Err != nil {
+			w.stream.err = "for_each " + msg.Parent + ": " + txt.FirstLine(msg.Err.Error())
+		}
+		return wizContinue, nil
 	case sampleMsg:
 		if !w.sampling || w.stream == nil {
 			return wizContinue, nil
@@ -516,11 +521,8 @@ func (w *repWizard) own(msg tea.Msg) (wizResult, tea.Cmd) {
 			return wizContinue, nil
 		}
 		sd, _ := w.formStream()
-		if msg.Parent != "" {
-			if w.parentCols == nil {
-				w.parentCols = map[string][]string{}
-			}
-			w.parentCols[msg.Parent] = msg.ParentCols
+		if msg.Parent != nil {
+			w.parents.set(*msg.Parent)
 		}
 		names := make([]string, len(msg.Cols))
 		kinds := map[string]db.Kind{}
