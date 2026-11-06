@@ -141,3 +141,31 @@ func TestDropTableFromPreview(t *testing.T) {
 		t.Fatalf("read only: %v %q", cmd, e.currentNote())
 	}
 }
+
+func TestSchemaBox(t *testing.T) {
+	e := openThings(t, testHome(t))
+	e.update(keyRunes("i"))
+	if !e.showCols {
+		t.Fatal("i opens the schema")
+	}
+	v := strings.Join(e.view(100, 24), "\n")
+	for _, want := range []string{"schema", "2 columns", "COLUMN", "KIND", "TYPE", "FIRST VALUE", "id", "int", "a"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("schema box lacks %q:\n%s", want, v)
+		}
+	}
+	if f, _, _ := e.previewKeys(); f[0] != "any key" {
+		t.Fatalf("footer: %v", f)
+	}
+	e.update(keyRunes("j"))
+	if e.showCols || e.rowCur != 0 {
+		t.Fatal("any key closes without acting")
+	}
+	// the steps panel keeps working while the box is up; a fetch with no columns closes it
+	e.update(keyRunes("i"))
+	e.cols = nil
+	e.applyPreview(previewMsg{seq: e.fetchSeq})
+	if e.showCols {
+		t.Fatal("no columns, no schema box")
+	}
+}

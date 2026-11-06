@@ -198,6 +198,7 @@ func (e *explorer) openPalette(stepsOnly bool) tea.Cmd {
 		add("refresh", "refresh", "R")
 		add("wide", "wide", "w")
 		add("value", "value", "v")
+		add("schema", "schema", "i")
 		if e.steppable() {
 			add("copy sql", "copy", "y")
 			add("full run", "bench", "b")
@@ -240,6 +241,8 @@ func (e *explorer) runCommand(cmd string) (wizResult, tea.Cmd) {
 		return e.keyPreview(keyRune('w'))
 	case cmd == "value":
 		return e.keyPreview(keyRune('v'))
+	case cmd == "schema":
+		return e.keyPreview(keyRune('i'))
 	case cmd == "add":
 		return wizContinue, e.toTargetPick()
 	case cmd == "save":

@@ -135,6 +135,7 @@ type explorer struct {
 	widths   map[string]int // per-column width overrides
 	wide     bool           // no width cap
 	showVal  bool           // full value of the current cell
+	showCols bool           // schema: every column, its type and first value
 
 	// bookmarks: saved queries on this connection
 	marks    []*config.Bookmark
@@ -443,7 +444,7 @@ func (e *explorer) previewKeys() ([]string, map[string]bool, string) {
 			pairs = append(pairs, "ctrl+e", "execute")
 		}
 		return append(pairs, "enter", "new line"), nil, helpLine("esc", "cancel")
-	case e.showVal:
+	case e.showVal || e.showCols:
 		return []string{"any key", "close"}, nil, ""
 	case e.focus == focusSteps:
 		return []string{"↑/↓", "step", "enter", "edit", "a", "add", "d", "delete", "J/K", "move", "y", "copy sql", "b", "full run", "pgup/pgdn", "sql"}, nil, helpLine("tab", "grid")
@@ -515,7 +516,7 @@ func (e *explorer) keyHelp() (string, [][2]string) {
 		if e.steppable() {
 			rows = append(rows, [2]string{"t", "add step"}, [2]string{"tab", "steps and sql"}, [2]string{"S", "edit sql; ctrl+s previews, ctrl+e executes as written"}, [2]string{"y", "copy sql"}, [2]string{"b", "full run: every row read, timed"})
 		}
-		rows = append(rows, [2]string{":", "commands"}, [2]string{"v  enter", "full value"}, [2]string{"m", "more rows"},
+		rows = append(rows, [2]string{":", "commands"}, [2]string{"v  enter", "full value"}, [2]string{"i", "schema: columns, types, first values"}, [2]string{"m", "more rows"},
 			[2]string{"R", "refresh"}, [2]string{"> <", "column width"}, [2]string{"=", "column width reset"}, [2]string{"w", "wide columns"},
 			[2]string{"+", "add to replication"})
 		switch {

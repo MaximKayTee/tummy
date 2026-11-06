@@ -418,7 +418,7 @@ func (e *explorer) applyPreview(msg previewMsg) tea.Cmd {
 		}
 		e.tickBase = strings.Join(e.tickedCols(), "\x00")
 		e.colCur, e.colOff, e.rowOff, e.rowCur = 0, 0, 0, 0
-		e.showVal = false
+		e.showVal, e.showCols = false, false
 		return e.showCmd()
 	}
 	for _, c := range e.cols {
@@ -436,8 +436,11 @@ func (e *explorer) applyPreview(msg previewMsg) tea.Cmd {
 	e.rowOff = min(e.rowOff, e.rowCur)
 	e.colCur = min(e.colCur, max(len(e.cols)-1, 0))
 	e.colOff = min(e.colOff, e.colCur)
-	if e.showVal && len(e.rows) == 0 {
+	if len(e.rows) == 0 {
 		e.showVal = false
+	}
+	if len(e.cols) == 0 {
+		e.showCols = false
 	}
 	return e.showCmd()
 }
@@ -469,8 +472,8 @@ func (e *explorer) keyPreview(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	if e.editSQL {
 		return e.keySQL(msg)
 	}
-	if e.showVal {
-		e.showVal = false
+	if e.showVal || e.showCols {
+		e.showVal, e.showCols = false, false
 		return wizContinue, nil
 	}
 	if e.focus == focusSteps && !e.steppable() {
@@ -503,6 +506,9 @@ func (e *explorer) keyPreview(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		}
 	case "b":
 		return wizContinue, e.bench()
+	case "i":
+		e.showCols = len(e.cols) > 0
+		return wizContinue, nil
 	}
 	if e.focus == focusSteps {
 		return e.keySteps(msg)
@@ -854,6 +860,9 @@ func (e *explorer) grid(width, height int) []string {
 	if e.showVal && e.rowCur < len(e.rows) && e.colCur < len(e.cols) {
 		return e.valueBox(width, height)
 	}
+	if e.showCols && len(e.cols) > 0 {
+		return e.schemaBox(width, height)
+	}
 	widths := make([]int, len(e.cols))
 	for i := range e.cols {
 		widths[i] = min(e.colWidth(i), max(width-4, 8))
@@ -950,6 +959,35 @@ func (e *explorer) grid(width, height int) []string {
 }
 
 // valueBox shows the full value of the current cell, wrapped to the width.
+// schemaBox lists every column with its kind, the driver's type and its first non-null
+// value in the loaded rows.
+func (e *explorer) schemaBox(width, height int) []string {
+	cols := []column{{Title: "COLUMN"}, {Title: "KIND", Width: 10}, {Title: "TYPE", Width: 16}, {Title: "FIRST VALUE"}}
+	rows := make([][]string, len(e.cols))
+	for i, c := range e.cols {
+		first := "∅"
+		for _, r := range e.rows {
+			if i < len(r) && r[i] != nil {
+				first = cell(r[i], c.Kind)
+				break
+			}
+		}
+		if len(e.rows) == 0 {
+			first = "—"
+		}
+		rows[i] = []string{txt.Clean(c.Name), c.Kind.String(), sDim.Render(txt.Clean(strings.ToLower(c.Type))), first}
+	}
+	out := []string{"  " + sHeader.Render("schema") + sDim.Render(fmt.Sprintf("  %d columns  first values from %d rows", len(e.cols), len(e.rows))), ""}
+	tbl := table(width-2, cols, rows, -1)
+	for _, l := range tbl {
+		out = append(out, "  "+l)
+	}
+	if len(out) > height {
+		out = append(out[:max(height-1, 0)], "  "+sDim.Render("…"))
+	}
+	return out
+}
+
 func (e *explorer) valueBox(width, height int) []string {
 	c := e.cols[e.colCur]
 	var raw any
