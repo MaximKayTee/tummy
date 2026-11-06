@@ -453,11 +453,11 @@ func (e *explorer) previewKeys() ([]string, map[string]bool, string) {
 		pairs = append(pairs, "t", "step", "tab", "steps")
 	}
 	pairs = append(pairs, "space", "tick")
-	if e.canSaveBack() {
+	switch {
+	case e.canSaveBack() || e.bookmark != "":
 		pairs = append(pairs, "ctrl+s", "save")
-	}
-	if e.canBookmark() {
-		pairs = append(pairs, "B", "bookmark")
+	case e.canBookmark():
+		pairs = append(pairs, "ctrl+s", "bookmark")
 	}
 	pairs = append(pairs, "+", "add", "m", "more", "v", "value")
 	if e.steppable() {
@@ -518,14 +518,13 @@ func (e *explorer) keyHelp() (string, [][2]string) {
 		rows = append(rows, [2]string{":", "commands"}, [2]string{"v  enter", "full value"}, [2]string{"m", "more rows"},
 			[2]string{"R", "refresh"}, [2]string{"> <", "column width"}, [2]string{"=", "column width reset"}, [2]string{"w", "wide columns"},
 			[2]string{"+", "add to replication"})
-		if e.canSaveBack() {
-			rows = append(rows, [2]string{"ctrl+s", "save to " + e.repName + ".toml › " + e.streamName})
-		}
 		switch {
+		case e.canSaveBack():
+			rows = append(rows, [2]string{"ctrl+s", "save to " + e.repName + ".toml › " + e.streamName})
 		case e.bookmark != "":
-			rows = append(rows, [2]string{"B", "save bookmark " + e.bookmark})
+			rows = append(rows, [2]string{"ctrl+s", "save bookmark " + e.bookmark})
 		case e.canBookmark():
-			rows = append(rows, [2]string{"B", "bookmark: the table or query and the steps, in bookmarks.toml; the replication is not changed"})
+			rows = append(rows, [2]string{"ctrl+s", "bookmark: the table or query and the steps, in bookmarks.toml; the replication is not changed"})
 		}
 		return "preview", append(rows, [2]string{"esc", "back"})
 	case pageStep:

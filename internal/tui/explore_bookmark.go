@@ -44,7 +44,8 @@ func (e *explorer) bookmarkable() string {
 	return ""
 }
 
-// saveBookmark is B: a known bookmark is rewritten, anything else asks for a name.
+// saveBookmark is ctrl+s off a wizard: a known bookmark is rewritten, anything else
+// asks for a name.
 func (e *explorer) saveBookmark() tea.Cmd {
 	if why := e.bookmarkable(); why != "" {
 		e.setNote(why, true)
