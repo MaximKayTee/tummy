@@ -25,7 +25,7 @@ type apiRun struct {
 	keep    map[string]bool         // streams a selected child depends on
 	full    map[string]bool         // streams whose children need every record: no watermark in the request
 	streams map[string]stream       // by name, for parents that are not selected
-	onDone  func(int)               // parents requested so far, for the child being opened
+	onDone  func(done, skipped int) // parents requested and skipped so far, for the child being opened
 }
 
 // plan marks the streams children depend on. streams are parent-first. A parent that is
@@ -168,11 +168,11 @@ func (e *Engine) openAPI(ctx context.Context, a *apiRun, tgt *db.DB, s stream, t
 			e.phase(ctx, runID, s, object, phase, int64(n))
 		}
 	}
-	done, of := 0, 0
+	done, of, skipped := 0, 0, 0
 	onPage := func(n int) {
 		if phase, object := PhaseFetching, target.String(); phase+object != cur || time.Since(last) > 300*time.Millisecond {
 			cur, last = phase+object, time.Now()
-			e.phase(ctx, runID, s, object, phase, int64(n), done, of)
+			e.phase(ctx, runID, s, object, phase, int64(n), done, of, skipped)
 		}
 	}
 	onParent := func(name string, n int) { report(PhaseParents, name, n) }
@@ -181,13 +181,13 @@ func (e *Engine) openAPI(ctx context.Context, a *apiRun, tgt *db.DB, s stream, t
 		return nil, err
 	}
 	of = len(parents)
-	a.onDone = func(n int) { done = n }
+	a.onDone = func(n, sk int) { done, skipped = n, sk }
 	own, kids, keys, err := a.fetch(fctx, s, wm, parents, onPage)
 	if err != nil {
 		return nil, err
 	}
 	if of > 0 { // the final count, past the throttle
-		e.phase(ctx, runID, s, target.String(), PhaseFetching, int64(len(own)), done, of)
+		e.phase(ctx, runID, s, target.String(), PhaseFetching, int64(len(own)), done, of, skipped)
 	}
 	if a.keep[s.Name] {
 		a.records[s.Name] = kids
@@ -389,15 +389,12 @@ func (a *apiRun) fetchAll(ctx context.Context, s stream, spec config.Stream, var
 		return withColumns(recs, s.AddColumns, vars), nil
 	}
 	var all []api.Record
-	skipped, empty := 0, 0
+	skipped, empty, skips := 0, 0, 0
 	byStatus := map[int]int{}
 	onPage := o.OnPage
 	for i, p := range parents {
 		if enough(len(all)) {
 			break
-		}
-		if a.onDone != nil {
-			a.onDone(i)
 		}
 		req := maps.Clone(vars) // nulls left out: the client reports them as ErrNoValue
 		add := maps.Clone(vars) // nulls empty
@@ -428,20 +425,24 @@ func (a *apiRun) fetchAll(ctx context.Context, s stream, spec config.Stream, var
 		switch {
 		case status != 0:
 			byStatus[status]++
+			skips++
 			a.e.log().Warn("for_each parent skipped", "stream", s.Name, "status", status, "parent", parentKey(s, p))
 		case len(recs) == 0:
 			empty++
 		}
 		all = append(all, withColumns(recs, s.AddColumns, add)...)
+		if a.onDone != nil {
+			a.onDone(i+1, skips)
+		}
 		if onPage != nil {
 			onPage(len(all)) // a parent with no records still moves the count
 		}
 	}
-	if a.onDone != nil {
-		a.onDone(len(parents))
-	}
 	if skipped > 0 {
 		a.e.log().Warn("for_each parents skipped: placeholder field missing or null", "stream", s.Name, "parents", skipped)
+	}
+	if empty > 0 && empty == len(parents)-skips && spec.Records != "" {
+		a.e.log().Warn("for_each: records matched nothing on every parent; check records", "stream", s.Name, "records", spec.Records)
 	}
 	args := []any{"stream", s.Name, "parents", len(parents), "records", len(all), "empty", empty}
 	for st, n := range byStatus {

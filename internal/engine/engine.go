@@ -47,13 +47,26 @@ var errInterrupted = fmt.Errorf("%w: interrupted", state.ErrCancelled)
 
 // Event is one step of a run, for progress displays.
 type Event struct {
-	Stream string
-	Object string
-	Phase  string // connecting, querying, loading, merging, done, failed
-	Rows   int64
-	Done   int // for_each: parents requested so far
-	Of     int // for_each: parents to request
-	Err    error
+	Stream  string
+	Object  string
+	Phase   string // connecting, querying, loading, merging, done, failed
+	Rows    int64
+	Done    int // for_each: parents requested so far
+	Of      int // for_each: parents to request
+	Skipped int // for_each: parents skipped on skip_on
+	Err     error
+}
+
+// Note words the for_each counts, empty without parents.
+func (ev Event) Note() string {
+	if ev.Of == 0 {
+		return ""
+	}
+	n := fmt.Sprintf("parent %d/%d", ev.Done, ev.Of)
+	if ev.Skipped > 0 {
+		n += fmt.Sprintf("  skipped %d", ev.Skipped)
+	}
+	return n
 }
 
 const (
@@ -82,12 +95,16 @@ func (e *Engine) emit(ev Event) {
 
 // phase records the phase in state and emits it.
 func (e *Engine) phase(ctx context.Context, runID int64, s stream, object, phase string, rows int64, parents ...int) {
-	if err := e.State.Progress(ctx, runID, rows, phase); err != nil {
-		e.log().Warn("state write failed", "stream", s.Name, "err", err)
-	}
 	ev := Event{Stream: s.Name, Object: object, Phase: phase, Rows: rows}
-	if len(parents) == 2 {
-		ev.Done, ev.Of = parents[0], parents[1]
+	var err error
+	if len(parents) == 3 {
+		ev.Done, ev.Of, ev.Skipped = parents[0], parents[1], parents[2]
+		err = e.State.Progress(ctx, runID, rows, phase, ev.Note())
+	} else {
+		err = e.State.Progress(ctx, runID, rows, phase)
+	}
+	if err != nil {
+		e.log().Warn("state write failed", "stream", s.Name, "err", err)
 	}
 	e.emit(ev)
 }

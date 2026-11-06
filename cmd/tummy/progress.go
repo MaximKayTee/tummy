@@ -74,8 +74,8 @@ func (p *progress) line() string {
 	case engine.PhaseParents:
 		return fmt.Sprintf("%s %s  parent %s %s  %s", frame, ev.Stream, ev.Object, txt.Thousands(ev.Rows), txt.Dur(time.Since(p.started)))
 	case engine.PhaseFetching:
-		if ev.Of > 0 {
-			return fmt.Sprintf("%s %s  fetching %s  parent %d/%d  %s", frame, ev.Stream, txt.Thousands(ev.Rows), ev.Done, ev.Of, txt.Dur(time.Since(p.started)))
+		if n := ev.Note(); n != "" {
+			return fmt.Sprintf("%s %s  fetching %s  %s  %s", frame, ev.Stream, txt.Thousands(ev.Rows), n, txt.Dur(time.Since(p.started)))
 		}
 		return fmt.Sprintf("%s %s  fetching %s  %s", frame, ev.Stream, txt.Thousands(ev.Rows), txt.Dur(time.Since(p.started)))
 	case engine.PhaseLoading:

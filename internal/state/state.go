@@ -36,6 +36,7 @@ type Run struct {
 	Phase       string // connecting, querying, loading, merging while running
 	Status      string // running, success, error, skipped, cancelled
 	Error       string
+	Note        string // for_each: parents done of total and skips; kept after the run
 }
 
 // ErrCancelled ends a run that was cancelled; Finish records it as status cancelled.
@@ -144,7 +145,7 @@ func DefaultPath() string {
 	return filepath.Join(base, "tummy", "state.db")
 }
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 const schema = `
 CREATE TABLE IF NOT EXISTS runs (
@@ -159,7 +160,8 @@ CREATE TABLE IF NOT EXISTS runs (
   rows INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL,
   error TEXT NOT NULL DEFAULT '',
-  cancel INTEGER NOT NULL DEFAULT 0
+  cancel INTEGER NOT NULL DEFAULT 0,
+  note TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS requests (
   id INTEGER PRIMARY KEY,
@@ -246,7 +248,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	for table, cols := range map[string][][2]string{
-		"runs":      {{"object", "TEXT NOT NULL DEFAULT ''"}, {"trigger", "TEXT NOT NULL DEFAULT 'cli'"}, {"phase", "TEXT NOT NULL DEFAULT ''"}, {"cancel", "INTEGER NOT NULL DEFAULT 0"}},
+		"runs":      {{"object", "TEXT NOT NULL DEFAULT ''"}, {"trigger", "TEXT NOT NULL DEFAULT 'cli'"}, {"phase", "TEXT NOT NULL DEFAULT ''"}, {"cancel", "INTEGER NOT NULL DEFAULT 0"}, {"note", "TEXT NOT NULL DEFAULT ''"}},
 		"requests":  {{"trigger", "TEXT NOT NULL DEFAULT ''"}},
 		"schedules": {{"error", "TEXT NOT NULL DEFAULT ''"}, {"last_fire", "TEXT"}},
 	} {
@@ -371,7 +373,11 @@ func (s *Store) Start(ctx context.Context, replication, stream, object, trigger 
 	return res.LastInsertId()
 }
 
-func (s *Store) Progress(ctx context.Context, id, rows int64, phase string) error {
+func (s *Store) Progress(ctx context.Context, id, rows int64, phase string, note ...string) error {
+	if len(note) > 0 {
+		_, err := s.db.ExecContext(ctx, "UPDATE runs SET rows = ?, phase = ?, note = ? WHERE id = ?", rows, phase, note[0], id)
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, "UPDATE runs SET rows = ?, phase = ? WHERE id = ?", rows, phase, id)
 	return err
 }
@@ -485,7 +491,7 @@ func (s *Store) abandon(ctx context.Context, rep string, lockDirs []string) (int
 	return res.RowsAffected()
 }
 
-const runCols = "id, replication, stream, object, trigger, phase, started, ended, rows, status, error"
+const runCols = "id, replication, stream, object, trigger, phase, started, ended, rows, status, error, note"
 
 func scanRuns(rows *sql.Rows) ([]Run, error) {
 	defer rows.Close()
@@ -494,7 +500,7 @@ func scanRuns(rows *sql.Rows) ([]Run, error) {
 		var r Run
 		var started string
 		var ended sql.NullString
-		if err := rows.Scan(&r.ID, &r.Replication, &r.Stream, &r.Object, &r.Trigger, &r.Phase, &started, &ended, &r.Rows, &r.Status, &r.Error); err != nil {
+		if err := rows.Scan(&r.ID, &r.Replication, &r.Stream, &r.Object, &r.Trigger, &r.Phase, &started, &ended, &r.Rows, &r.Status, &r.Error, &r.Note); err != nil {
 			return nil, err
 		}
 		var err error

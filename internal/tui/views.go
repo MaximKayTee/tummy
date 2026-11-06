@@ -792,7 +792,7 @@ func (m Model) definition(s config.ResolvedStream, source string) []string {
 func (m Model) statusCell(r state.Run) string {
 	switch r.Status {
 	case "running":
-		return sWarn.Render(m.spin.View() + " " + phaseLabel(r.Phase, r.Rows))
+		return sWarn.Render(m.spin.View() + " " + withNote(phaseLabel(r.Phase, r.Rows), r.Note))
 	case "error":
 		return sErr.Render(glyphErr + " " + txt.Clean(txt.FirstLine(r.Error)))
 	case "skipped":
@@ -800,7 +800,15 @@ func (m Model) statusCell(r state.Run) string {
 	case "cancelled":
 		return sWarn.Render(glyphSkip + " cancelled")
 	}
-	return sOK.Render(glyphOK + " ok")
+	return sOK.Render(withNote(glyphOK+" ok", r.Note))
+}
+
+// withNote appends a run's for_each note.
+func withNote(label, note string) string {
+	if note == "" {
+		return label
+	}
+	return label + "  " + note
 }
 
 // ---------- history ----------
@@ -1079,7 +1087,7 @@ func phaseLabel(phase string, rows int64) string {
 func runningLabel(r replication) string {
 	for _, run := range r.Last {
 		if run.Status == "running" {
-			return txt.Clean(run.Stream) + ": " + phaseLabel(run.Phase, run.Rows)
+			return txt.Clean(run.Stream) + ": " + withNote(phaseLabel(run.Phase, run.Rows), run.Note)
 		}
 	}
 	return "starting"
