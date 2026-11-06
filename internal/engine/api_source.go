@@ -52,11 +52,18 @@ func (a *apiRun) feed(ctx context.Context, tgt *db.DB, name string, onPage func(
 	if !ok {
 		return fmt.Errorf("for_each %q is not a stream", name)
 	}
-	parents, err := a.parents(ctx, tgt, s, db.Table{}, false, onPage)
+	var last time.Time
+	own := func(n int) { // reported under the parent's name, not the child's
+		if last.IsZero() || time.Since(last) > 300*time.Millisecond {
+			last = time.Now()
+			a.e.emit(Event{Stream: name, Phase: PhaseFetching, Rows: int64(n)})
+		}
+	}
+	parents, err := a.parents(ctx, tgt, s, db.Table{}, false, own)
 	if err != nil {
 		return err
 	}
-	_, kids, _, err := a.fetch(ctx, s, nil, parents, onPage)
+	_, kids, _, err := a.fetch(ctx, s, nil, parents, own)
 	if err != nil {
 		return fmt.Errorf("for_each %s: %w", name, err)
 	}
@@ -240,6 +247,7 @@ func (a *apiRun) parents(ctx context.Context, tgt *db.DB, s stream, target db.Ta
 			return nil, err
 		}
 		parents = a.records[s.ForEach]
+		onPage(0) // back to the child's line
 	}
 	total := len(parents)
 	if s.ForEachSince != "" {
