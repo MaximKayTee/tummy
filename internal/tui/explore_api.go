@@ -15,6 +15,7 @@ import (
 
 	"tummy/internal/api"
 	"tummy/internal/config"
+	"tummy/internal/db"
 	"tummy/internal/engine"
 )
 
@@ -174,12 +175,20 @@ type parentColsMsg struct {
 	Err    error
 }
 
-// parentColumns reads the parent's first page for its columns.
-func parentColumns(conn *config.Conn, name string, parent config.Stream) tea.Cmd {
+// parentColumns reads the parent's columns: from its target table when loaded, else from
+// its first page.
+func parentColumns(conns *config.Connections, draft config.ReplicationDraft, name string, parent config.Stream) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		client, err := api.NewClient(conn)
+		if cols, ok := loadedColumns(ctx, conns, draft, name, parent); ok {
+			return parentColsMsg{Parent: name, Cols: cols}
+		}
+		src, err := conns.Get(draft.Source)
+		if err != nil {
+			return parentColsMsg{Parent: name, Err: err}
+		}
+		client, err := api.NewClient(src)
 		if err != nil {
 			return parentColsMsg{Parent: name, Err: err}
 		}
@@ -195,6 +204,36 @@ func parentColumns(conn *config.Conn, name string, parent config.Stream) tea.Cmd
 		}
 		return parentColsMsg{Parent: name, Cols: names}
 	}
+}
+
+// loadedColumns are the columns of the stream's target table, when the target is a
+// database and the table exists.
+func loadedColumns(ctx context.Context, conns *config.Connections, draft config.ReplicationDraft, name string, s config.Stream) ([]string, bool) {
+	c, err := conns.Get(draft.Target)
+	if err != nil || c.Type == "api" {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	tgt, err := db.Open(ctx, c.DB())
+	if err != nil {
+		return nil, false
+	}
+	defer tgt.Close()
+	s.Object = cmpOr(s.Object, draft.Defaults.Object)
+	table := engine.TargetTable(tgt, config.ResolvedStream{Name: name, Stream: s})
+	if exists, err := tgt.TableExists(ctx, table); err != nil || !exists {
+		return nil, false
+	}
+	cols, err := tgt.Columns(ctx, table)
+	if err != nil {
+		return nil, false
+	}
+	names := make([]string, len(cols))
+	for i, col := range cols {
+		names[i] = col.Name
+	}
+	return names, true
 }
 
 // parentCache holds the columns of for_each parents read so far, and the one being read.
@@ -220,17 +259,17 @@ func (c *parentCache) set(msg parentColsMsg) {
 
 // want starts a read of the form's for_each parent when its columns are unknown. The
 // parent is looked up in the draft's streams.
-func (c *parentCache) want(f *form, conn *config.Conn, streams []config.StreamDraft) tea.Cmd {
+func (c *parentCache) want(f *form, conns *config.Connections, draft config.ReplicationDraft) tea.Cmd {
 	name := f.get("for_each")
 	if name == "" || c.cols[name] != nil || c.pending == name {
 		return nil
 	}
-	i := slices.IndexFunc(streams, func(o config.StreamDraft) bool { return o.Name == name })
+	i := slices.IndexFunc(draft.Streams, func(o config.StreamDraft) bool { return o.Name == name })
 	if i < 0 {
 		return nil
 	}
 	c.pending = name
-	return parentColumns(conn, name, streams[i].Stream)
+	return parentColumns(conns, draft, name, draft.Streams[i].Stream)
 }
 
 // addedKeys are the add_columns names, sorted.

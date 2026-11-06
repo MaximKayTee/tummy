@@ -683,7 +683,7 @@ func (e *explorer) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	case pageStream:
 		res, cmd := e.stream.update(msg)
 		if e.isAPI {
-			cmd = tea.Batch(cmd, e.parents.want(e.stream, e.conn, e.draft.Streams))
+			cmd = tea.Batch(cmd, e.parents.want(e.stream, e.conns, e.draft))
 		}
 		switch res {
 		case formCancel:

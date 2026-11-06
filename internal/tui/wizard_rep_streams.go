@@ -207,9 +207,7 @@ func (w *repWizard) keyStream(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	}
 	res, cmd := w.stream.update(msg)
 	if w.isAPI() {
-		if c, err := w.conns.Get(w.draft.Source); err == nil {
-			cmd = tea.Batch(cmd, w.parents.want(w.stream, c, w.draft.Streams))
-		}
+		cmd = tea.Batch(cmd, w.parents.want(w.stream, w.conns, w.draft))
 	}
 	switch res {
 	case formCancel:
