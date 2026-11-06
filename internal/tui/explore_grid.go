@@ -493,6 +493,10 @@ func (e *explorer) keyPreview(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	case ":", "ctrl+p":
 		return wizContinue, e.openPalette(false)
 	case "ctrl+s":
+		if !e.canSaveBack() {
+			e.setNote("B: bookmark  E on the stream: edit it", true)
+			return wizContinue, nil
+		}
 		return wizContinue, e.saveBack()
 	case "B":
 		return wizContinue, e.saveBookmark()

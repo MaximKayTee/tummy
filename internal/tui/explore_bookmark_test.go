@@ -251,8 +251,8 @@ func TestSourcePreviewNeverSavesTheStream(t *testing.T) {
 	before, _ := os.ReadFile(filepath.Join(opts.Home, "replications", "alpha.toml"))
 	e.pipeline = append(e.pipeline, parseOne(t, "filter id > 1"))
 	press1(e, keyRunes("R"))
-	if _, cmd := e.update(keySave); cmd != nil || e.page != pagePreview {
-		t.Fatal("ctrl+s must do nothing on a source preview")
+	if _, cmd := e.update(keySave); cmd != nil || e.page != pagePreview || !strings.HasPrefix(e.currentNote(), "B: bookmark") {
+		t.Fatalf("ctrl+s on a source preview only points at B: %q", e.currentNote())
 	}
 	after, _ := os.ReadFile(filepath.Join(opts.Home, "replications", "alpha.toml"))
 	if string(before) != string(after) {
