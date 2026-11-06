@@ -22,23 +22,47 @@ type apiRun struct {
 	e       *Engine
 	client  *api.Client
 	records map[string][]api.Record // records of parents, for for_each children
-	keep    map[string]bool         // streams with a selected child
+	keep    map[string]bool         // streams a selected child depends on
 	full    map[string]bool         // streams whose children need every record: no watermark in the request
+	streams map[string]stream       // by name, for parents that are not selected
 }
 
-// plan marks the streams children depend on. streams are parent-first.
+// plan marks the streams children depend on. streams are parent-first. A parent that is
+// not selected itself is fetched for its records when its child runs, not loaded.
 func (a *apiRun) plan(streams []stream, selected func(stream) bool) {
-	a.keep, a.full = map[string]bool{}, map[string]bool{}
+	a.keep, a.full, a.streams = map[string]bool{}, map[string]bool{}, map[string]stream{}
+	for _, s := range streams {
+		a.streams[s.Name] = s
+	}
 	for i := len(streams) - 1; i >= 0; i-- {
 		s := streams[i]
-		if !selected(s) || s.ForEach == "" {
+		if (!selected(s) && !a.keep[s.Name]) || s.ForEach == "" {
 			continue
 		}
 		a.keep[s.ForEach] = true
-		if s.Mode != "incremental" || s.SkipExisting != "" || a.full[s.Name] {
+		if s.Mode != "incremental" || s.SkipExisting != "" || a.full[s.Name] || !selected(s) {
 			a.full[s.ForEach] = true
 		}
 	}
+}
+
+// feed fetches a parent that is not selected, for its records only: no run, no load.
+func (a *apiRun) feed(ctx context.Context, tgt *db.DB, name string, onPage func(int)) error {
+	s, ok := a.streams[name]
+	if !ok {
+		return fmt.Errorf("for_each %q is not a stream", name)
+	}
+	parents, err := a.parents(ctx, tgt, s, db.Table{}, false, onPage)
+	if err != nil {
+		return err
+	}
+	_, kids, _, err := a.fetch(ctx, s, nil, parents, onPage)
+	if err != nil {
+		return fmt.Errorf("for_each %s: %w", name, err)
+	}
+	a.records[name] = kids
+	a.e.log().Info("for_each parent fetched", "stream", name, "records", len(kids))
+	return nil
 }
 
 // orderByForEach sorts streams so parents run before children.
@@ -93,12 +117,12 @@ func (e *Engine) openAPI(ctx context.Context, a *apiRun, tgt *db.DB, s stream, t
 	}
 	var last time.Time
 	onPage := func(n int) {
-		if n == 0 || time.Since(last) > 300*time.Millisecond {
+		if last.IsZero() || time.Since(last) > 300*time.Millisecond {
 			last = time.Now()
 			e.phase(ctx, runID, s, target.String(), PhaseFetching, int64(n))
 		}
 	}
-	parents, err := a.parents(ctx, tgt, s, target, exists)
+	parents, err := a.parents(fctx, tgt, s, target, exists, onPage)
 	if err != nil {
 		return nil, err
 	}
@@ -205,13 +229,17 @@ func (a *apiRun) fetch(ctx context.Context, s stream, wm any, parents []api.Reco
 
 // parents are the records a for_each stream runs for: the parent's records minus those
 // below for_each_since and those whose skip_existing value the target already holds.
-func (a *apiRun) parents(ctx context.Context, tgt *db.DB, s stream, target db.Table, exists bool) ([]api.Record, error) {
+// A parent that did not run is fetched first.
+func (a *apiRun) parents(ctx context.Context, tgt *db.DB, s stream, target db.Table, exists bool, onPage func(int)) ([]api.Record, error) {
 	if s.ForEach == "" {
 		return nil, nil
 	}
 	parents, ok := a.records[s.ForEach]
 	if !ok {
-		return nil, fmt.Errorf("for_each %q has not run", s.ForEach)
+		if err := a.feed(ctx, tgt, s.ForEach, onPage); err != nil {
+			return nil, err
+		}
+		parents = a.records[s.ForEach]
 	}
 	total := len(parents)
 	if s.ForEachSince != "" {
@@ -333,6 +361,9 @@ func (a *apiRun) fetchAll(ctx context.Context, s stream, spec config.Stream, var
 			return nil, err
 		}
 		all = append(all, withColumns(recs, s.AddColumns, add)...)
+		if onPage != nil {
+			onPage(len(all)) // a parent with no records still moves the count
+		}
 	}
 	if skipped > 0 {
 		a.e.log().Warn("for_each parents skipped: placeholder field missing or null", "stream", s.Name, "parents", skipped)

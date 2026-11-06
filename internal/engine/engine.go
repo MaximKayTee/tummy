@@ -213,12 +213,6 @@ func (e *Engine) run(ctx context.Context, r *config.Replication, only []string) 
 		return !s.Disabled && (want == nil || want[s.Name] || want[s.from])
 	}
 	if arun != nil {
-		// a child needs its ancestors; streams are parent-first
-		for i := len(streams) - 1; i >= 0; i-- {
-			if s := streams[i]; want != nil && want[s.Name] && s.ForEach != "" {
-				want[s.ForEach] = true
-			}
-		}
 		arun.plan(streams, selected)
 	}
 

@@ -81,9 +81,16 @@ for_each = "a"
 [streams.a]
 path = "/a"
 `)
+	// only the child runs; its ancestors are fetched for their records, not loaded
 	res := f.run(f.engine(), r, "c")
-	if len(res) != 3 || f.count("SELECT count(*) FROM c") != 8 || tr.hits.Load() != 1+2+4 {
+	if len(res) != 1 || res[0].Stream != "c" || f.count("SELECT count(*) FROM c") != 8 || tr.hits.Load() != 1+2+4 {
 		t.Fatalf("%+v hits=%d", res, tr.hits.Load())
+	}
+	if n := f.count("SELECT count(*) FROM sqlite_master WHERE name IN ('a', 'b')"); n != 0 {
+		t.Fatalf("ancestors loaded: %d tables", n)
+	}
+	if runs, _ := f.st.RunsFor(context.Background(), r.Name, "", 10); len(runs) != 1 {
+		t.Fatalf("runs recorded: %d", len(runs))
 	}
 }
 
