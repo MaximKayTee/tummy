@@ -767,7 +767,7 @@ func (m Model) keyDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return next, cmd
 		}
-		w, err := newTargetExplorer(m.opts, rep.Target, run.Object)
+		w, err := newTargetExplorer(m.opts, rep.Name, stream, rep.Target, run.Object)
 		return m.openWizard(w, err)
 	case key.Matches(msg, keys.History) && hasStream:
 		m.streamName = stream

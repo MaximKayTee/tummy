@@ -47,6 +47,18 @@ schedule = "*/15 * * * *"
 
 `tummy check NAME` validates a replication.
 
+```toml
+# bookmarks.toml
+[bookmark.paid_orders]
+conn = "OUT"
+table = "orders"
+steps = "filter status = 'paid' | remove internal_notes"
+rep = "sales"
+stream = "orders"
+```
+
+Bookmarks are saved queries on a connection: a `table` or `sql`, with `steps`. Nothing is written to the connection. `rep` and `stream` name the stream whose target table the bookmark was made on. In the UI: ctrl+s on a table, query or target preview that is not a stream; bookmarks list first in the connection's table list; `y` copies the query (OSC 52); `b` runs it in full and shows rows and time. In the sql editor (`S`) ctrl+s previews and ctrl+e executes the text as written, rows affected shown. `D` on a table, or `drop table` in the command palette, drops it after its name is typed. Both refused on `read_only` connections.
+
 ## Commands
 
 ```

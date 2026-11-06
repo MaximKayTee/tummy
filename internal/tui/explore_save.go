@@ -19,15 +19,13 @@ const newRepOption = "new replication"
 // ---------- ctrl+s: back to the stream ----------
 
 func (e *explorer) canSaveBack() bool {
-	return !e.readOnly && e.repName != "" && e.streamName != ""
+	return e.repName != "" && e.streamName != ""
 }
 
 // saveBack writes the steps, select and sql of the preview to the stream it came from.
 // A table opened through a wildcard becomes its own stream.
 func (e *explorer) saveBack() tea.Cmd {
 	switch {
-	case e.readOnly:
-		return nil
 	case e.streamName == "":
 		e.setNote("not a stream  +: add", true)
 		return nil
@@ -163,9 +161,6 @@ func (e *explorer) writeDraft(d config.ReplicationDraft) error {
 }
 
 func (e *explorer) toTargetPick() tea.Cmd {
-	if e.readOnly {
-		return nil
-	}
 	if e.bound != nil {
 		return e.toStreamForm()
 	}

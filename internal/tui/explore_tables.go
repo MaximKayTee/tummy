@@ -63,6 +63,27 @@ func (e *explorer) visibleTables() []string {
 	return e.sortTables(out)
 }
 
+// listItem is a row of the table list: a bookmark, or a table.
+type listItem struct {
+	name string
+	mark *config.Bookmark
+}
+
+// visibleItems lists the bookmarks on the connection, then the tables, both filtered.
+func (e *explorer) visibleItems() []listItem {
+	f := strings.ToLower(e.filter.Value())
+	var out []listItem
+	for _, b := range e.marks {
+		if f == "" || strings.Contains(strings.ToLower(b.Name), f) {
+			out = append(out, listItem{name: b.Name, mark: b})
+		}
+	}
+	for _, t := range e.visibleTables() {
+		out = append(out, listItem{name: t})
+	}
+	return out
+}
+
 func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	if e.filtering {
 		switch msg.String() {
@@ -77,7 +98,7 @@ func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		e.cur = 0
 		return wizContinue, cmd
 	}
-	vis := e.visibleTables()
+	vis := e.visibleItems()
 	switch msg.String() {
 	case "esc", "q", "left", "h":
 		return wizCancel, nil
@@ -103,8 +124,22 @@ func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			return wizContinue, e.refreshStats()
 		}
 	case "c":
-		if e.statsBusy == "" && e.opts.State != nil && e.cur < len(vis) {
-			return wizContinue, e.countTable(vis[e.cur])
+		if e.statsBusy == "" && e.opts.State != nil && e.cur < len(vis) && vis[e.cur].mark == nil {
+			return wizContinue, e.countTable(vis[e.cur].name)
+		}
+	case "D":
+		if e.cur < len(vis) && vis[e.cur].mark == nil {
+			return wizContinue, e.askDrop(vis[e.cur].name)
+		}
+	case "d":
+		if e.cur < len(vis) && vis[e.cur].mark != nil {
+			name := vis[e.cur].name
+			e.ask = &exploreAsk{text: "delete bookmark " + name + "? y/n", yes: func() (wizResult, tea.Cmd) {
+				if err := e.deleteBookmark(name); err != nil {
+					e.statsNote, e.statsErr = txt.FirstLine(err.Error()), true
+				}
+				return wizContinue, nil
+			}}
 		}
 	case "o":
 		e.sortBy = (e.sortBy + 1) % 3
@@ -118,7 +153,10 @@ func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		return wizContinue, e.sqlInput.Focus()
 	case "enter", "l":
 		if e.cur < len(vis) {
-			return wizContinue, e.openTable(vis[e.cur])
+			if it := vis[e.cur]; it.mark != nil {
+				return wizContinue, e.openBookmark(it.mark)
+			}
+			return wizContinue, e.openTable(vis[e.cur].name)
 		}
 	}
 	return wizContinue, nil
@@ -151,6 +189,9 @@ func (e *explorer) resetPreview() {
 	e.baseSteps, e.baseSQL, e.tickBase = "", "", ""
 	e.limit, e.total, e.counted, e.complete, e.parents = 1, -1, "", false, ""
 	e.fresh, e.anchor, e.discarded, e.wm = true, false, false, nil
+	e.bookmark, e.onRep, e.onStream = "", "", ""
+	e.benching, e.benchText = false, ""
+	e.execBusy = false
 }
 
 // openSpec takes a stream's settings: its steps become the pipeline, and without steps
@@ -203,7 +244,7 @@ func (e *explorer) tablesView(width, height int) []string {
 	case e.loadErr != "":
 		return append(out, errBox(e.loadErr, width, max(height-len(out), 3))...)
 	}
-	vis := e.visibleTables()
+	vis := e.visibleItems()
 	if len(vis) == 0 {
 		return append(out, "  "+sDim.Render("none"))
 	}
@@ -213,6 +254,7 @@ func (e *explorer) tablesView(width, height int) []string {
 		nameW = width - statsWidth - 2
 		out = append(out, sDim.Render(pad("  TABLE", nameW, false)+"  "+statsHeader()))
 	}
+	markW := max(min(width/3, 40), 12)
 	rows := max(height-len(out), 1)
 	e.tableRows = rows
 	if e.cur < e.offset {
@@ -222,10 +264,16 @@ func (e *explorer) tablesView(width, height int) []string {
 		e.offset = e.cur - rows + 1
 	}
 	for i := e.offset; i < min(e.offset+rows, len(vis)); i++ {
-		line := pad("  "+txt.Clean(vis[i]), width, false)
-		if withStats {
-			s, ok := e.stats[vis[i]]
-			line = pad("  "+txt.Clean(vis[i]), nameW, false) + "  " + statsColumns(s, ok)
+		it := vis[i]
+		var line string
+		switch {
+		case it.mark != nil:
+			line = pad("  "+txt.Clean(it.name), markW, false) + "  " + sDim.Render(ansi.Truncate(txt.Clean(markText(it.mark)), max(width-markW-2, 4), "…"))
+		case withStats:
+			s, ok := e.stats[it.name]
+			line = pad("  "+txt.Clean(it.name), nameW, false) + "  " + statsColumns(s, ok)
+		default:
+			line = pad("  "+txt.Clean(it.name), width, false)
 		}
 		if i == e.cur {
 			line = selectedLine(line, width)
@@ -233,6 +281,18 @@ func (e *explorer) tablesView(width, height int) []string {
 		out = append(out, line)
 	}
 	return out
+}
+
+// markText is a bookmark's table or query, then its steps.
+func markText(b *config.Bookmark) string {
+	base := b.Table
+	if b.SQL != "" {
+		base = "sql› " + txt.FirstLine(b.SQL)
+	}
+	if b.Steps == "" {
+		return base
+	}
+	return base + "  |  " + b.Steps
 }
 
 // ---------- the stream behind a preview ----------

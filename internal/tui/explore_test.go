@@ -280,19 +280,20 @@ func TestEnterShowsTargetData(t *testing.T) {
 	m = loaded(t, opts)
 	m = press(m, "enter", "enter") // alpha › things › data
 	e, ok := m.wiz.(*explorer)
-	if !ok || !e.readOnly || e.table != "things" || e.conn.Name != "TGT" {
+	if !ok || e.table != "things" || e.conn.Name != "TGT" || e.onRep != "alpha" || e.onStream != "things" {
 		t.Fatalf("enter should open the target table: %+v", m.wiz)
 	}
 	run(e, e.start())
 	if len(e.rows) != 3 || len(e.cols) != 2 {
 		t.Fatalf("target rows: %d %s", len(e.rows), e.fetchErr)
 	}
-	if res, _ := e.update(keyRunes("+")); res != wizContinue || e.page != pagePreview {
-		t.Fatal("+ must do nothing on target data")
+	if !strings.Contains(strings.Join(e.view(100, 20), "\n"), "TGT") {
+		t.Fatal("head names the target connection")
 	}
-	if e.update(keyRunes("t")); e.page != pagePreview {
-		t.Fatal("no steps on target data")
+	if e.update(keyRunes("t")); e.page != pagePalette {
+		t.Fatal("steps apply on target data")
 	}
+	e.update(keyEsc)
 	m = press(m, "esc", "H")
 	if m.view != viewHistory || m.streamName != "things" {
 		t.Fatalf("H should open the stream history: %d %q", m.view, m.streamName)
@@ -1101,7 +1102,7 @@ func TestCellsEscapeControls(t *testing.T) {
 func TestEnterOnUnloadedStreamPreviews(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "enter", "enter")
-	if e, ok := m.wiz.(*explorer); !ok || e.readOnly || e.table != "things" {
+	if e, ok := m.wiz.(*explorer); !ok || e.onStream != "" || e.table != "things" || e.conn.Name != "SRC" {
 		t.Fatalf("enter on an unloaded stream should preview the source: %+v", m.wiz)
 	}
 }

@@ -198,11 +198,19 @@ func (e *explorer) openPalette(stepsOnly bool) tea.Cmd {
 		add("refresh", "refresh", "R")
 		add("wide", "wide", "w")
 		add("value", "value", "v")
-		if !e.readOnly {
-			add("add to replication", "add", "+")
+		if e.steppable() {
+			add("copy sql", "copy", "y")
+			add("full run", "bench", "b")
 		}
+		add("add to replication", "add", "+")
 		if e.canSaveBack() {
 			add("save to "+e.repName+" › "+e.streamName, "save", "ctrl+s")
+		}
+		if e.canBookmark() {
+			add("bookmark", "bookmark", "")
+		}
+		if e.table != "" && e.spec.SQL == "" && e.writable() {
+			add("drop table "+e.table, "drop", "")
 		}
 	}
 	e.palette.single = true
@@ -233,6 +241,16 @@ func (e *explorer) runCommand(cmd string) (wizResult, tea.Cmd) {
 		return wizContinue, e.toTargetPick()
 	case cmd == "save":
 		return wizContinue, e.saveBack()
+	case cmd == "copy":
+		return wizContinue, e.copySQL()
+	case cmd == "bench":
+		return wizContinue, e.bench()
+	case cmd == "drop":
+		if e.spec.SQL == "" {
+			return wizContinue, e.askDrop(e.table)
+		}
+	case cmd == "bookmark":
+		return wizContinue, e.toBookmarkForm()
 	}
 	return wizContinue, nil
 }

@@ -30,6 +30,7 @@ var (
 	keyTab   = tea.KeyMsg{Type: tea.KeyTab}
 	keyRight = tea.KeyMsg{Type: tea.KeyRight}
 	keySave  = tea.KeyMsg{Type: tea.KeyCtrlS}
+	keyCtrlE = tea.KeyMsg{Type: tea.KeyCtrlE}
 	keySpace = tea.KeyMsg{Type: tea.KeySpace}
 	keyDown  = tea.KeyMsg{Type: tea.KeyDown}
 	keyUp    = tea.KeyMsg{Type: tea.KeyUp}

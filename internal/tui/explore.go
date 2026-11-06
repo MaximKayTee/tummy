@@ -31,6 +31,8 @@ const (
 	pagePalette
 	pageTarget
 	pageStream
+	pageBookmark
+	pageDrop
 )
 
 // gridFocus is where preview keys go.
@@ -85,7 +87,6 @@ type explorer struct {
 
 	// the stream the preview belongs to, for ctrl+s
 	fromStream bool   // esc leaves instead of going to the table list
-	readOnly   bool   // target data: no steps, no saving
 	sample     bool   // opened in place of target data that does not exist yet
 	discarded  bool   // leaving was confirmed: dirty reports false from then on
 	repName    string // replication file, "" when unknown
@@ -134,6 +135,25 @@ type explorer struct {
 	widths   map[string]int // per-column width overrides
 	wide     bool           // no width cap
 	showVal  bool           // full value of the current cell
+
+	// bookmarks: saved queries on this connection
+	marks    []*config.Bookmark
+	bookmark string // the bookmark the preview was opened from or saved as
+	markForm *form
+	onRep    string // the stream whose target table is previewed
+	onStream string
+
+	// statements: execute from the sql editor, drop table
+	execBusy  bool
+	execSeq   int
+	dropTable string
+	dropForm  *form
+	dropFrom  explorePage // page to return to
+
+	// full run: the query as compiled, every row read and dropped, timed
+	benching  bool
+	benchSeq  int
+	benchText string
 
 	// add to replication
 	repPick  *form
@@ -229,6 +249,9 @@ func newExplorer(opts Options, connName string) (*explorer, error) {
 	ti.Placeholder = "filter"
 	e := &explorer{opts: opts, conns: conns, conn: c, isAPI: c.Type == "api", filter: ti, sqlInput: newSQLArea(),
 		ticked: map[string]bool{}, widths: map[string]int{}, stepEdit: -1, stepWait: -1, fresh: true, total: -1}
+	if err := e.loadMarks(); err != nil {
+		return nil, err
+	}
 	if e.isAPI {
 		e.page = pageEndpoint
 		e.endpoint = e.endpointForm(config.Stream{})
@@ -307,8 +330,9 @@ func newWildcardExplorer(opts Options, rep, connName string, s config.ResolvedSt
 	return e, nil
 }
 
-// newTargetExplorer shows the rows a stream loaded into its target table.
-func newTargetExplorer(opts Options, connName, object string) (*explorer, error) {
+// newTargetExplorer shows the rows stream of rep loaded into its target table object.
+// Steps apply on top; ctrl+s bookmarks them.
+func newTargetExplorer(opts Options, rep, stream, connName, object string) (*explorer, error) {
 	e, err := newExplorer(opts, connName)
 	if err != nil {
 		return nil, err
@@ -316,7 +340,7 @@ func newTargetExplorer(opts Options, connName, object string) (*explorer, error)
 	e.table = object
 	e.page = pagePreview
 	e.fromStream = true
-	e.readOnly = true
+	e.onRep, e.onStream = rep, stream
 	return e, nil
 }
 
@@ -420,25 +444,30 @@ func (e *explorer) previewKeys() ([]string, map[string]bool, string) {
 	}
 	switch {
 	case e.editSQL:
-		return []string{"ctrl+s", "run", "enter", "new line"}, nil, helpLine("esc", "cancel")
+		pairs := []string{"ctrl+s", "preview"}
+		if e.writable() {
+			pairs = append(pairs, "ctrl+e", "execute")
+		}
+		return append(pairs, "enter", "new line"), nil, helpLine("esc", "cancel")
 	case e.showVal:
 		return []string{"any key", "close"}, nil, ""
-	case e.readOnly:
-		return []string{"←/→ ↑/↓", "move", "v", "value", "m", "more", "> <", "width", "w", "wide", "R", "refresh"}, off, back
 	case e.focus == focusSteps:
-		return []string{"↑/↓", "step", "enter", "edit", "a", "add", "d", "delete", "J/K", "move", "pgup/pgdn", "sql"}, nil, helpLine("tab", "grid")
+		return []string{"↑/↓", "step", "enter", "edit", "a", "add", "d", "delete", "J/K", "move", "y", "copy sql", "b", "full run", "pgup/pgdn", "sql"}, nil, helpLine("tab", "grid")
 	}
 	pairs := []string{":", "commands"}
 	if e.steppable() {
 		pairs = append(pairs, "t", "step", "tab", "steps")
 	}
 	pairs = append(pairs, "space", "tick")
-	if e.canSaveBack() {
+	switch {
+	case e.canSaveBack():
 		pairs = append(pairs, "ctrl+s", "save")
+	case e.canBookmark():
+		pairs = append(pairs, "ctrl+s", "bookmark")
 	}
 	pairs = append(pairs, "+", "add", "m", "more", "v", "value")
 	if e.steppable() {
-		pairs = append(pairs, "S", "sql")
+		pairs = append(pairs, "S", "sql", "y", "copy sql", "b", "full run")
 	}
 	return pairs, off, back
 }
@@ -474,7 +503,7 @@ func (e *explorer) keyHelp() (string, [][2]string) {
 		return "tables", [][2]string{
 			{"enter", "preview"}, {"s", "row counts and sizes of every table from the catalog, kept as history"},
 			{"c", "exact COUNT(*) of the table"}, {"o", "sort by name, rows, size"},
-			{"S", "sql query"}, {"/", "filter"}, {"R", "refresh the table list"}, {"esc", "back"},
+			{"S", "sql query"}, {"d", "delete bookmark (y/n)"}, {"D", "drop the table; its name is typed to confirm"}, {"/", "filter"}, {"R", "refresh the table list"}, {"esc", "back"},
 		}
 	case pageEndpoint:
 		return "endpoint", [][2]string{{"enter", "next field"}, {"ctrl+s", "fetch"}, {"esc", "back"}}
@@ -482,25 +511,26 @@ func (e *explorer) keyHelp() (string, [][2]string) {
 		if e.focus == focusSteps {
 			return "steps", [][2]string{
 				{"↑/↓", "step; past the last: sql"}, {"pgup/pgdn", "scroll"}, {"enter  e", "edit step"},
-				{"a", "add step"}, {"d", "delete step (y/n)"}, {"J/K", "move step down / up"}, {"tab  esc", "grid"},
+				{"a", "add step"}, {"d", "delete step (y/n)"}, {"J/K", "move step down / up"}, {"y", "copy sql"}, {"b", "full run: every row read, timed"}, {"tab  esc", "grid"},
 			}
 		}
 		rows := [][2]string{
 			{"←/→ ↑/↓", "move"}, {"g/G", "first / last row"}, {"pgup/pgdn", "page"},
-		}
-		if !e.readOnly {
-			rows = append(rows, [2]string{"space", "tick column"}, [2]string{"a / n", "tick all / none"})
+			{"space", "tick column"}, {"a / n", "tick all / none"},
 		}
 		if e.steppable() {
-			rows = append(rows, [2]string{"t", "add step"}, [2]string{"tab", "steps and sql"}, [2]string{"S", "edit sql"})
+			rows = append(rows, [2]string{"t", "add step"}, [2]string{"tab", "steps and sql"}, [2]string{"S", "edit sql; ctrl+s previews, ctrl+e executes as written"}, [2]string{"y", "copy sql"}, [2]string{"b", "full run: every row read, timed"})
 		}
 		rows = append(rows, [2]string{":", "commands"}, [2]string{"v  enter", "full value"}, [2]string{"m", "more rows"},
-			[2]string{"R", "refresh"}, [2]string{"> <", "column width"}, [2]string{"=", "column width reset"}, [2]string{"w", "wide columns"})
-		if !e.readOnly {
-			rows = append(rows, [2]string{"+", "add to replication"})
-		}
-		if e.canSaveBack() {
+			[2]string{"R", "refresh"}, [2]string{"> <", "column width"}, [2]string{"=", "column width reset"}, [2]string{"w", "wide columns"},
+			[2]string{"+", "add to replication"})
+		switch {
+		case e.canSaveBack():
 			rows = append(rows, [2]string{"ctrl+s", "save to " + e.repName + ".toml › " + e.streamName})
+		case e.bookmark != "":
+			rows = append(rows, [2]string{"ctrl+s", "save bookmark " + e.bookmark})
+		case e.canBookmark():
+			rows = append(rows, [2]string{"ctrl+s", "bookmark"})
 		}
 		return "preview", append(rows, [2]string{"esc", "back"})
 	case pageStep:
@@ -512,6 +542,10 @@ func (e *explorer) keyHelp() (string, [][2]string) {
 		return "commands", [][2]string{{"type", "filter"}, {"↑/↓", "move"}, {"enter", "run"}, {"esc", "close"}}
 	case pageTarget, pageStream:
 		return "add to replication", [][2]string{{"tab  ↓", "next field"}, {"ctrl+s", "save"}, {"esc", "back"}}
+	case pageBookmark:
+		return "bookmark", [][2]string{{"enter  ctrl+s", "save"}, {"esc", "back"}}
+	case pageDrop:
+		return "drop table", [][2]string{{"enter", "drop; the table name must match"}, {"esc", "back"}}
 	}
 	return "", nil
 }
@@ -560,6 +594,11 @@ func (e *explorer) dispatch(msg tea.Msg) (wizResult, tea.Cmd) {
 		return wizContinue, e.applyPreview(msg)
 	case prefixMsg:
 		return wizContinue, e.applyPrefix(msg)
+	case benchMsg:
+		e.applyBench(msg)
+		return wizContinue, nil
+	case execMsg:
+		return wizContinue, e.applyExec(msg)
 	case shownMsg:
 		if msg.seq == e.shownSeq {
 			e.shown = msg.SQL
@@ -659,6 +698,31 @@ func (e *explorer) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			return wizContinue, nil
 		}
 		return wizContinue, cmd
+	case pageDrop:
+		res, cmd := e.dropForm.update(msg)
+		switch res {
+		case formCancel:
+			e.page = e.dropFrom
+			return wizContinue, nil
+		case formSubmit:
+			return wizContinue, e.drop()
+		}
+		return wizContinue, cmd
+	case pageBookmark:
+		res, cmd := e.markForm.update(msg)
+		switch res {
+		case formCancel:
+			e.page = pagePreview
+			return wizContinue, nil
+		case formSubmit:
+			if err := e.writeBookmark(e.markForm.get("name")); err != nil {
+				e.markForm.err = txt.FirstLine(err.Error())
+				return wizContinue, nil
+			}
+			e.page = pagePreview
+			return wizContinue, nil
+		}
+		return wizContinue, cmd
 	}
 	return wizContinue, nil
 }
@@ -688,6 +752,10 @@ func (e *explorer) view(width, height int) []string {
 		return e.repPick.view(width, height)
 	case pageStream:
 		return e.stream.view(width, height)
+	case pageBookmark:
+		return e.markForm.view(width, height)
+	case pageDrop:
+		return e.dropForm.view(width, height)
 	}
 	return nil
 }

@@ -72,7 +72,7 @@ func (e *explorer) runName() string {
 
 // needsWatermark: an incremental stream of a replication reads its target's high mark.
 func (e *explorer) needsWatermark() bool {
-	return !e.isAPI && !e.readOnly && e.repName != "" && e.streamName != "" &&
+	return !e.isAPI && e.repName != "" && e.streamName != "" &&
 		e.spec.Mode == "incremental" && e.spec.UpdateKey != ""
 }
 
@@ -109,6 +109,7 @@ func (q runQuery) compile(ctx context.Context, d *db.DB) (string, []any, [][]str
 func (e *explorer) fetch() tea.Cmd {
 	e.fetching = true
 	e.fetchErr = ""
+	e.benchText = ""
 	e.fetchSeq = nextSeq()
 	if e.limit == 0 {
 		e.limit = 1
@@ -255,7 +256,7 @@ func (e *explorer) shownSQL() string {
 // showCmd compiles the query a save would make the run send: ticks as select or a
 // trailing keep, the watermark of an incremental stream.
 func (e *explorer) showCmd() tea.Cmd {
-	if e.isAPI || e.readOnly || len(e.cols) == 0 || e.dl == nil {
+	if e.isAPI || len(e.cols) == 0 || e.dl == nil {
 		return nil
 	}
 	e.shownSeq = nextSeq()
@@ -456,7 +457,7 @@ func (e *explorer) currentNote() string {
 
 // ---------- preview keys ----------
 
-func (e *explorer) steppable() bool { return !e.isAPI && !e.readOnly }
+func (e *explorer) steppable() bool { return !e.isAPI }
 
 // panelBeside: wide enough for the steps panel next to the grid; narrower, tab shows it
 // in place of the grid. Before the first frame the width is unknown.
@@ -492,7 +493,16 @@ func (e *explorer) keyPreview(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	case ":", "ctrl+p":
 		return wizContinue, e.openPalette(false)
 	case "ctrl+s":
-		return wizContinue, e.saveBack()
+		if e.streamName != "" {
+			return wizContinue, e.saveBack()
+		}
+		return wizContinue, e.saveBookmark()
+	case "y":
+		if e.steppable() {
+			return wizContinue, e.copySQL()
+		}
+	case "b":
+		return wizContinue, e.bench()
 	}
 	if e.focus == focusSteps {
 		return e.keySteps(msg)
@@ -538,18 +548,16 @@ func (e *explorer) keyPreview(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			e.showVal = true
 		}
 	case " ", "x":
-		if !e.readOnly && e.colCur < len(e.cols) {
+		if e.colCur < len(e.cols) {
 			n := e.cols[e.colCur].Name
 			e.ticked[n] = !e.ticked[n]
 			return wizContinue, e.showCmd()
 		}
 	case "a", "n":
-		if !e.readOnly {
-			for _, c := range e.cols {
-				e.ticked[c.Name] = msg.String() == "a"
-			}
-			return wizContinue, e.showCmd()
+		for _, c := range e.cols {
+			e.ticked[c.Name] = msg.String() == "a"
 		}
+		return wizContinue, e.showCmd()
 	case "S":
 		return wizContinue, e.openSQL()
 	case "R":
@@ -593,22 +601,23 @@ func (e *explorer) leaveNow() (wizResult, tea.Cmd) {
 	return wizContinue, nil
 }
 
-// dirty: a stream preview with unsaved steps, ticks or sql; a table preview with steps.
+// dirty: a stream or bookmark preview with unsaved steps, ticks or sql; a table preview
+// with steps.
 func (e *explorer) dirty() bool {
-	if e.readOnly || e.discarded {
+	if e.discarded {
 		return false
 	}
 	if renderSteps(e.pipeline) != e.baseSteps {
 		return true
 	}
-	if e.streamName == "" {
+	if e.streamName == "" && e.bookmark == "" {
 		return false
 	}
 	return e.spec.SQL != e.baseSQL || (e.tickBase != "" && strings.Join(e.tickedCols(), "\x00") != e.tickBase)
 }
 
 func (e *explorer) openSQL() tea.Cmd {
-	if e.isAPI || e.readOnly {
+	if e.isAPI {
 		return nil
 	}
 	e.editSQL = true
@@ -629,6 +638,8 @@ func (e *explorer) keySQL(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			e.page = pageTables
 		}
 		return wizContinue, nil
+	case "ctrl+e":
+		return wizContinue, e.execSQL()
 	case "ctrl+s":
 		sql := strings.TrimSpace(e.sqlInput.Value())
 		if sql == "" {
@@ -784,14 +795,23 @@ func (e *explorer) previewHead(width int) string {
 	if e.sample {
 		parts = append(parts, sWarn.Render("source sample"))
 	}
-	if e.readOnly {
+	if e.onStream != "" {
 		parts = append(parts, sDim.Render(e.conn.Name))
+	}
+	if e.bookmark != "" {
+		parts = append(parts, sDim.Render("bookmark "+txt.Clean(e.bookmark)))
 	}
 	switch {
 	case e.fetching && len(e.cols) > 0:
 		parts = append(parts, sWarn.Render("◐ more"))
 	case e.stepWait >= 0:
 		parts = append(parts, sWarn.Render(fmt.Sprintf("◐ step %d", e.stepWait+1)))
+	case e.execBusy:
+		parts = append(parts, sWarn.Render("◐ executing"))
+	case e.benching:
+		parts = append(parts, sWarn.Render("◐ full run"))
+	case e.benchText != "":
+		parts = append(parts, sDim.Render(e.benchText))
 	}
 	if e.dirty() {
 		parts = append(parts, sWarn.Render("●"))
@@ -801,9 +821,7 @@ func (e *explorer) previewHead(width int) string {
 		if e.parents != "" {
 			parts = append(parts, sDim.Render(e.parents))
 		}
-		if !e.readOnly {
-			parts = append(parts, sDim.Render(fmt.Sprintf("%d/%d columns", len(e.tickedCols()), len(e.cols))))
-		}
+		parts = append(parts, sDim.Render(fmt.Sprintf("%d/%d columns", len(e.tickedCols()), len(e.cols))))
 	}
 	if b := e.boundText(); b != "" {
 		parts = append(parts, sDim.Render(txt.Clean(b)))
