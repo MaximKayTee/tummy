@@ -1060,6 +1060,8 @@ func phaseLabel(phase string, rows int64) string {
 		return "connecting"
 	case "querying":
 		return "querying"
+	case "parents":
+		return "parent " + txt.Thousands(rows)
 	case "fetching":
 		return "fetching " + txt.Thousands(rows)
 	case "loading":

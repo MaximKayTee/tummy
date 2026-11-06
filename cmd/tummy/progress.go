@@ -71,6 +71,8 @@ func (p *progress) line() string {
 		return fmt.Sprintf("%s connecting %s", frame, ev.Object)
 	case engine.PhaseQuerying:
 		return fmt.Sprintf("%s %s  querying  %s", frame, ev.Stream, txt.Dur(time.Since(p.started)))
+	case engine.PhaseParents:
+		return fmt.Sprintf("%s %s  parent %s %s  %s", frame, ev.Stream, ev.Object, txt.Thousands(ev.Rows), txt.Dur(time.Since(p.started)))
 	case engine.PhaseFetching:
 		return fmt.Sprintf("%s %s  fetching %s  %s", frame, ev.Stream, txt.Thousands(ev.Rows), txt.Dur(time.Since(p.started)))
 	case engine.PhaseLoading:

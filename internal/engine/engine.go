@@ -57,6 +57,7 @@ type Event struct {
 const (
 	PhaseConnecting = "connecting"
 	PhaseQuerying   = "querying"
+	PhaseParents    = "parents" // a for_each parent fetched for its records; Object is its name
 	PhaseFetching   = "fetching"
 	PhaseLoading    = "loading"
 	PhaseMerging    = "merging"

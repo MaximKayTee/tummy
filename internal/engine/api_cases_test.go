@@ -94,6 +94,36 @@ path = "/a"
 	}
 }
 
+// The child's run reports each parent fetch as its own phase, then its own fetch.
+func TestAPIForEachChildOnlyProgress(t *testing.T) {
+	f, _ := treeFixture(t)
+	r := f.replication(`
+source = "T"
+target = "TGT"
+[streams.c]
+path = "/b/{b.id}/c"
+for_each = "b"
+[streams.b]
+path = "/a/{a.id}/b"
+for_each = "a"
+[streams.a]
+path = "/a"
+`)
+	e := f.engine()
+	var seen []string // distinct phase+object in order; counts are throttled
+	e.OnEvent = func(ev Event) {
+		if ev.Stream == "c" && (ev.Phase == PhaseParents || ev.Phase == PhaseFetching) {
+			if k := ev.Phase + " " + ev.Object; len(seen) == 0 || seen[len(seen)-1] != k {
+				seen = append(seen, k)
+			}
+		}
+	}
+	f.run(e, r, "c")
+	if got := strings.Join(seen, "|"); got != "parents a|parents b|fetching c" {
+		t.Fatalf("phases: %s", got)
+	}
+}
+
 func TestAPIForEachIncrementalParent(t *testing.T) {
 	f, tr := treeFixture(t)
 	r := f.replication(`

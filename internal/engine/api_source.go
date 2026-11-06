@@ -47,23 +47,17 @@ func (a *apiRun) plan(streams []stream, selected func(stream) bool) {
 }
 
 // feed fetches a parent that is not selected, for its records only: no run, no load.
-func (a *apiRun) feed(ctx context.Context, tgt *db.DB, name string, onPage func(int)) error {
+func (a *apiRun) feed(ctx context.Context, tgt *db.DB, name string, onParent func(string, int)) error {
 	s, ok := a.streams[name]
 	if !ok {
 		return fmt.Errorf("for_each %q is not a stream", name)
 	}
-	var last time.Time
-	own := func(n int) { // reported under the parent's name, not the child's
-		if last.IsZero() || time.Since(last) > 300*time.Millisecond {
-			last = time.Now()
-			a.e.emit(Event{Stream: name, Phase: PhaseFetching, Rows: int64(n)})
-		}
-	}
-	parents, err := a.parents(ctx, tgt, s, db.Table{}, false, own)
+	parents, err := a.parents(ctx, tgt, s, db.Table{}, false, onParent)
 	if err != nil {
 		return err
 	}
-	_, kids, _, err := a.fetch(ctx, s, nil, parents, own)
+	onParent(name, 0)
+	_, kids, _, err := a.fetch(ctx, s, nil, parents, func(n int) { onParent(name, n) })
 	if err != nil {
 		return fmt.Errorf("for_each %s: %w", name, err)
 	}
@@ -123,13 +117,16 @@ func (e *Engine) openAPI(ctx context.Context, a *apiRun, tgt *db.DB, s stream, t
 		defer cancel()
 	}
 	var last time.Time
-	onPage := func(n int) {
-		if last.IsZero() || time.Since(last) > 300*time.Millisecond {
-			last = time.Now()
-			e.phase(ctx, runID, s, target.String(), PhaseFetching, int64(n))
+	var cur string
+	report := func(phase, object string, n int) {
+		if phase+object != cur || time.Since(last) > 300*time.Millisecond {
+			cur, last = phase+object, time.Now()
+			e.phase(ctx, runID, s, object, phase, int64(n))
 		}
 	}
-	parents, err := a.parents(fctx, tgt, s, target, exists, onPage)
+	onPage := func(n int) { report(PhaseFetching, target.String(), n) }
+	onParent := func(name string, n int) { report(PhaseParents, name, n) }
+	parents, err := a.parents(fctx, tgt, s, target, exists, onParent)
 	if err != nil {
 		return nil, err
 	}
@@ -237,17 +234,16 @@ func (a *apiRun) fetch(ctx context.Context, s stream, wm any, parents []api.Reco
 // parents are the records a for_each stream runs for: the parent's records minus those
 // below for_each_since and those whose skip_existing value the target already holds.
 // A parent that did not run is fetched first.
-func (a *apiRun) parents(ctx context.Context, tgt *db.DB, s stream, target db.Table, exists bool, onPage func(int)) ([]api.Record, error) {
+func (a *apiRun) parents(ctx context.Context, tgt *db.DB, s stream, target db.Table, exists bool, onParent func(string, int)) ([]api.Record, error) {
 	if s.ForEach == "" {
 		return nil, nil
 	}
 	parents, ok := a.records[s.ForEach]
 	if !ok {
-		if err := a.feed(ctx, tgt, s.ForEach, onPage); err != nil {
+		if err := a.feed(ctx, tgt, s.ForEach, onParent); err != nil {
 			return nil, err
 		}
 		parents = a.records[s.ForEach]
-		onPage(0) // back to the child's line
 	}
 	total := len(parents)
 	if s.ForEachSince != "" {
