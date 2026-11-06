@@ -135,8 +135,10 @@ path = "/a"
 `)
 	e := f.engine()
 	var seen []string // distinct phase+object in order; counts are throttled
+	var last Event
 	e.OnEvent = func(ev Event) {
 		if ev.Stream == "c" && (ev.Phase == PhaseParents || ev.Phase == PhaseFetching) {
+			last = ev
 			if k := ev.Phase + " " + ev.Object; len(seen) == 0 || seen[len(seen)-1] != k {
 				seen = append(seen, k)
 			}
@@ -145,6 +147,9 @@ path = "/a"
 	f.run(e, r, "c")
 	if got := strings.Join(seen, "|"); got != "parents a|parents b|fetching c" {
 		t.Fatalf("phases: %s", got)
+	}
+	if last.Of != 4 || last.Done != 4 || last.Rows != 8 {
+		t.Fatalf("last fetching event: %+v", last)
 	}
 }
 

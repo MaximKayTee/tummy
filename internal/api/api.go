@@ -76,6 +76,8 @@ type Options struct {
 	Vars map[string]string
 	// OnPage is called after every page with the records fetched so far.
 	OnPage func(records int)
+	// OnSkip is called when a status in the stream's skip_on ends the fetch.
+	OnSkip func(status int)
 	// StopAfter is asked after every non-empty page whether to stop paging.
 	StopAfter func(page []Record) bool
 	// MaxPages caps the requests of one call; 0 means no cap.
@@ -251,6 +253,9 @@ func (c *Client) fetch(ctx context.Context, s *config.Stream, o Options) ([]Reco
 		if err != nil {
 			var he *HTTPError
 			if errors.As(err, &he) && slices.Contains(s.SkipOn, he.Status) {
+				if o.OnSkip != nil {
+					o.OnSkip(he.Status)
+				}
 				return all, nil
 			}
 			return nil, err

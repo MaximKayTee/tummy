@@ -51,6 +51,8 @@ type Event struct {
 	Object string
 	Phase  string // connecting, querying, loading, merging, done, failed
 	Rows   int64
+	Done   int // for_each: parents requested so far
+	Of     int // for_each: parents to request
 	Err    error
 }
 
@@ -79,11 +81,15 @@ func (e *Engine) emit(ev Event) {
 }
 
 // phase records the phase in state and emits it.
-func (e *Engine) phase(ctx context.Context, runID int64, s stream, object, phase string, rows int64) {
+func (e *Engine) phase(ctx context.Context, runID int64, s stream, object, phase string, rows int64, parents ...int) {
 	if err := e.State.Progress(ctx, runID, rows, phase); err != nil {
 		e.log().Warn("state write failed", "stream", s.Name, "err", err)
 	}
-	e.emit(Event{Stream: s.Name, Object: object, Phase: phase, Rows: rows})
+	ev := Event{Stream: s.Name, Object: object, Phase: phase, Rows: rows}
+	if len(parents) == 2 {
+		ev.Done, ev.Of = parents[0], parents[1]
+	}
+	e.emit(ev)
 }
 
 type Result struct {

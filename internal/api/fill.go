@@ -5,9 +5,31 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"tummy/internal/config"
 )
 
 var placeholder = regexp.MustCompile(`\{([A-Za-z0-9_.]+)\}`)
+
+// Placeholders lists the fields {prefix.field} of a stream's path, body and query use,
+// without the prefix, each once.
+func Placeholders(s *config.Stream, prefix string) []string {
+	var out []string
+	seen := map[string]bool{}
+	scan := func(text string) {
+		for _, m := range placeholder.FindAllStringSubmatch(text, -1) {
+			if f, ok := strings.CutPrefix(m[1], prefix); ok && !seen[f] {
+				seen[f] = true
+				out = append(out, f)
+			}
+		}
+	}
+	scan(s.Path)
+	scan(s.Body)
+	for _, v := range s.Query {
+		scan(v)
+	}
+	return out
+}
 
 // fillPath fills the path part with url.PathEscape and any query part with url.QueryEscape.
 func fillPath(p string, vars map[string]string) (string, error) {
