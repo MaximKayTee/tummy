@@ -168,10 +168,10 @@ func (e *Engine) openAPI(ctx context.Context, a *apiRun, tgt *db.DB, s stream, t
 			e.phase(ctx, runID, s, object, phase, int64(n))
 		}
 	}
-	done, of, skipped := 0, 0, 0
+	done, of, skipped, shown := 0, 0, 0, -1
 	onPage := func(n int) {
-		if phase, object := PhaseFetching, target.String(); phase+object != cur || time.Since(last) > 300*time.Millisecond {
-			cur, last = phase+object, time.Now()
+		if phase, object := PhaseFetching, target.String(); phase+object != cur || done != shown || time.Since(last) > 300*time.Millisecond {
+			cur, last, shown = phase+object, time.Now(), done
 			e.phase(ctx, runID, s, object, phase, int64(n), done, of, skipped)
 		}
 	}
