@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ func (a *apiRun) plan(streams []stream, selected func(stream) bool) {
 			continue
 		}
 		a.keep[s.ForEach] = true
-		if s.Mode != "incremental" || a.full[s.Name] {
+		if s.Mode != "incremental" || s.SkipExisting != "" || a.full[s.Name] {
 			a.full[s.ForEach] = true
 		}
 	}
@@ -97,7 +98,11 @@ func (e *Engine) openAPI(ctx context.Context, a *apiRun, tgt *db.DB, s stream, t
 			e.phase(ctx, runID, s, target.String(), PhaseFetching, int64(n))
 		}
 	}
-	own, kids, keys, err := a.fetch(fctx, s, wm, onPage)
+	parents, err := a.parents(ctx, tgt, s, target, exists)
+	if err != nil {
+		return nil, err
+	}
+	own, kids, keys, err := a.fetch(fctx, s, wm, parents, onPage)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +130,7 @@ func (e *Engine) openAPI(ctx context.Context, a *apiRun, tgt *db.DB, s stream, t
 
 // fetch returns the records s loads (own), those its children iterate (kids) and the
 // record keys in response order.
-func (a *apiRun) fetch(ctx context.Context, s stream, wm any, onPage func(int)) (own, kids []api.Record, keys []string, err error) {
+func (a *apiRun) fetch(ctx context.Context, s stream, wm any, parents []api.Record, onPage func(int)) (own, kids []api.Record, keys []string, err error) {
 	incremental := s.Mode == "incremental" && s.UpdateKey != "" && wm != nil
 	inclusive := len(s.PrimaryKey) > 0
 	narrow := incremental && !a.full[s.Name] // the request may use the watermark
@@ -174,7 +179,7 @@ func (a *apiRun) fetch(ctx context.Context, s stream, wm any, onPage func(int)) 
 		}
 	}
 
-	all, err := a.fetchAll(ctx, s, spec, vars, o, enough)
+	all, err := a.fetchAll(ctx, s, spec, vars, parents, o, enough)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -198,9 +203,96 @@ func (a *apiRun) fetch(ctx context.Context, s stream, wm any, onPage func(int)) 
 	return own, kids, keys, nil
 }
 
+// parents are the records a for_each stream runs for: the parent's records minus those
+// below for_each_since and those whose skip_existing value the target already holds.
+func (a *apiRun) parents(ctx context.Context, tgt *db.DB, s stream, target db.Table, exists bool) ([]api.Record, error) {
+	if s.ForEach == "" {
+		return nil, nil
+	}
+	parents, ok := a.records[s.ForEach]
+	if !ok {
+		return nil, fmt.Errorf("for_each %q has not run", s.ForEach)
+	}
+	total := len(parents)
+	if s.ForEachSince != "" {
+		key, since, err := config.ParseForEachSince(s.ForEachSince)
+		if err != nil {
+			return nil, err
+		}
+		parents = newerThan(parents, key, since, true)
+	}
+	if s.SkipExisting != "" && exists {
+		have, err := a.loaded(ctx, tgt, s, target)
+		if err != nil {
+			return nil, err
+		}
+		kept := parents[:0:0]
+		for _, p := range parents {
+			if v := parentValue(s, s.SkipExisting, p); v == "" || !have[v] {
+				kept = append(kept, p)
+			}
+		}
+		parents = kept
+	}
+	if len(parents) < total {
+		a.e.log().Info("for_each parents", "stream", s.Name, "of", total, "run", len(parents))
+	}
+	return parents, nil
+}
+
+// loaded is the set of skip_existing values in the target, as text.
+func (a *apiRun) loaded(ctx context.Context, tgt *db.DB, s stream, target db.Table) (map[string]bool, error) {
+	cols, err := tgt.Columns(ctx, target)
+	if err != nil {
+		return nil, fmt.Errorf("skip_existing: %w", err)
+	}
+	i := slices.IndexFunc(cols, func(c db.Column) bool { return strings.EqualFold(c.Name, s.SkipExisting) })
+	if i < 0 {
+		return nil, fmt.Errorf("skip_existing: %s has no column %s", target, s.SkipExisting)
+	}
+	vals, err := tgt.Distinct(ctx, "SELECT "+tgt.Dialect.Quote(cols[i].Name)+" FROM "+tgt.Quote(target), cols[i].Name, 0)
+	if err != nil {
+		return nil, fmt.Errorf("skip_existing: %w", err)
+	}
+	have := make(map[string]bool, len(vals))
+	for _, v := range vals {
+		if v != nil {
+			have[keyText(v)] = true
+		}
+	}
+	return have, nil
+}
+
+// parentValue is what col holds for parent p: its add_columns template filled, else the
+// parent field of that name.
+func parentValue(s stream, col string, p api.Record) string {
+	if tmpl, ok := s.AddColumns[col]; ok {
+		v := tmpl
+		for k, val := range p {
+			v = strings.ReplaceAll(v, "{"+s.ForEach+"."+k+"}", formatValue(val))
+		}
+		return keyText(v)
+	}
+	return keyText(field(p, col))
+}
+
+// keyText is a value as comparison text: integers without decimals, times in RFC 3339.
+func keyText(v any) string {
+	if v == nil {
+		return ""
+	}
+	if n, ok := asInt(v); ok {
+		return strconv.FormatInt(n, 10)
+	}
+	if t, ok := asTime(v); ok {
+		return t.UTC().Format(time.RFC3339Nano)
+	}
+	return formatValue(v)
+}
+
 // fetchAll runs the requests for s, once per parent record with for_each. Parents whose
 // placeholder fields are missing or null are skipped.
-func (a *apiRun) fetchAll(ctx context.Context, s stream, spec config.Stream, vars map[string]string, o api.Options, enough func(int) bool) ([]api.Record, error) {
+func (a *apiRun) fetchAll(ctx context.Context, s stream, spec config.Stream, vars map[string]string, parents []api.Record, o api.Options, enough func(int) bool) ([]api.Record, error) {
 	if s.ForEach == "" {
 		o.Vars = vars
 		recs, err := a.client.FetchWith(ctx, &spec, o)
@@ -208,10 +300,6 @@ func (a *apiRun) fetchAll(ctx context.Context, s stream, spec config.Stream, var
 			return nil, err
 		}
 		return withColumns(recs, s.AddColumns, vars), nil
-	}
-	parents, ok := a.records[s.ForEach]
-	if !ok {
-		return nil, fmt.Errorf("for_each %q has not run", s.ForEach)
 	}
 	var all []api.Record
 	skipped := 0

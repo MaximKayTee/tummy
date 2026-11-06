@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -179,6 +180,22 @@ func checkControls(v reflect.Value, multiline ...string) error {
 	return nil
 }
 
+// ParseForEachSince splits "field, value" into the parent field and the lower bound.
+// A value of the form Nd is N days before now.
+func ParseForEachSince(v string) (field string, since any, err error) {
+	f, val, ok := strings.Cut(v, ",")
+	f, val = strings.TrimSpace(f), strings.TrimSpace(val)
+	if !ok || f == "" || val == "" {
+		return "", nil, fmt.Errorf(`for_each_since %q: want "field, value"`, v)
+	}
+	if n, found := strings.CutSuffix(val, "d"); found {
+		if days, err := strconv.Atoi(n); err == nil && days >= 0 {
+			return f, time.Now().UTC().AddDate(0, 0, -days), nil
+		}
+	}
+	return f, val, nil
+}
+
 func validateStream(name string, s *Stream, raw bool) error {
 	fail := func(format string, args ...any) error {
 		return fmt.Errorf("stream %s: "+format, append([]any{name}, args...)...)
@@ -236,6 +253,17 @@ func validateStream(name string, s *Stream, raw bool) error {
 	}
 	if s.ForEach == name {
 		return fail("for_each names the stream itself")
+	}
+	if s.SkipExisting != "" && s.ForEach == "" {
+		return fail("skip_existing needs for_each")
+	}
+	if s.ForEachSince != "" {
+		if s.ForEach == "" {
+			return fail("for_each_since needs for_each")
+		}
+		if _, _, err := ParseForEachSince(s.ForEachSince); err != nil {
+			return fail("%v", err)
+		}
 	}
 	if s.SinceFormat != "" && !contains(sinceFormats, s.SinceFormat) {
 		return fail("since_format %q: want %s", s.SinceFormat, orList(sinceFormats))

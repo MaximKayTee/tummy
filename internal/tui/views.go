@@ -762,6 +762,8 @@ func (m Model) definition(s config.ResolvedStream, source string) []string {
 		}
 		row("limit", num(s.Limit))
 		row("for_each", s.ForEach)
+		row("skip_existing", s.SkipExisting)
+		row("for_each_since", s.ForEachSince)
 		if s.SinceParam != "" {
 			row("since", s.SinceParam+"  "+cmp.Or(s.SinceFormat, "rfc3339")+"  "+s.Sorted)
 		}

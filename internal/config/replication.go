@@ -29,22 +29,24 @@ type Stream struct {
 	QueryTimeout string `toml:"query_timeout"`
 
 	// api
-	Path        string            `toml:"path"`
-	Method      string            `toml:"method"`
-	Query       map[string]string `toml:"query"`
-	Body        string            `toml:"body"`
-	Records     string            `toml:"records"`
-	Paginate    string            `toml:"paginate"`
-	PageSize    int               `toml:"page_size"`
-	PageParam   string            `toml:"page_param"`
-	SizeParam   string            `toml:"size_param"`
-	CursorField string            `toml:"cursor_field"`
-	CursorParam string            `toml:"cursor_param"`
-	ForEach     string            `toml:"for_each"`
-	AddColumns  map[string]string `toml:"add_columns"`
-	SinceParam  string            `toml:"since_param"`
-	SinceFormat string            `toml:"since_format"` // rfc3339 (default), date, unix, unix_ms, raw
-	Sorted      string            `toml:"sorted"`       // desc: newest first, paging stops at the watermark
+	Path         string            `toml:"path"`
+	Method       string            `toml:"method"`
+	Query        map[string]string `toml:"query"`
+	Body         string            `toml:"body"`
+	Records      string            `toml:"records"`
+	Paginate     string            `toml:"paginate"`
+	PageSize     int               `toml:"page_size"`
+	PageParam    string            `toml:"page_param"`
+	SizeParam    string            `toml:"size_param"`
+	CursorField  string            `toml:"cursor_field"`
+	CursorParam  string            `toml:"cursor_param"`
+	ForEach      string            `toml:"for_each"`
+	AddColumns   map[string]string `toml:"add_columns"`
+	SkipExisting string            `toml:"skip_existing"`  // target column; parents with a value already loaded are skipped
+	ForEachSince string            `toml:"for_each_since"` // "field, value": parents below it are skipped; value a date, number or Nd
+	SinceParam   string            `toml:"since_param"`
+	SinceFormat  string            `toml:"since_format"` // rfc3339 (default), date, unix, unix_ms, raw
+	Sorted       string            `toml:"sorted"`       // desc: newest first, paging stops at the watermark
 
 	SkipOn     []int  `toml:"skip_on"`     // statuses that end a fetch with no error
 	StopWhen   string `toml:"stop_when"`   // JMESPath on the response; truthy stops paging

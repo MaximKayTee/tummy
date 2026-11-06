@@ -45,6 +45,29 @@ schedule = "*/15 * * * *"
 [streams."sales.*"]
 ```
 
+```toml
+# replications/videos.toml
+source = "FILES_API"
+target = "LOCAL"
+mode = "incremental"
+
+[streams.files]
+path = "/files"
+primary_key = ["fileID"]
+update_key = "fileID"
+
+[streams.videos]
+path = "/files/{files.fileID}/video"
+for_each = "files"
+primary_key = ["fileID"]
+add_columns = { fileID = "{files.fileID}" }
+skip_existing = "fileID"
+for_each_since = "created, 90d"
+skip_on = [404]
+```
+
+`for_each` runs the stream once per record of the parent stream. `skip_existing` names a column of the stream's target table: parents whose value is already loaded are skipped, so a parent without a child row is tried on every run; the parent stream is then read in full, not from its watermark. `for_each_since` is `field, value`: parents below it are skipped, with `Nd` meaning N days ago.
+
 `tummy check NAME` validates a replication.
 
 Previews never change a stream. Enter on a loaded stream shows its target data, `p` its source data; steps there are for looking and bookmarking. A stream is edited with `E`; in that wizard's preview ctrl+s saves the stream, everywhere else ctrl+s saves a bookmark.

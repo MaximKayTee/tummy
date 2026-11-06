@@ -326,6 +326,23 @@ func newAPI(t *testing.T) *apiServer {
 		}
 		json.NewEncoder(w).Encode(posts)
 	})
+	// items with a video each, except 4 (404) and 2 which is old
+	mux.HandleFunc("/items", func(w http.ResponseWriter, r *http.Request) {
+		s.hits.Add(1)
+		json.NewEncoder(w).Encode([]map[string]any{
+			{"id": 1, "created": "2026-03-01"}, {"id": 2, "created": "2025-01-01"},
+			{"id": 3, "created": "2026-03-03"}, {"id": 4, "created": "2026-03-04"}, {"id": 5, "created": "2026-03-05"},
+		})
+	})
+	mux.HandleFunc("/items/", func(w http.ResponseWriter, r *http.Request) {
+		s.hits.Add(1)
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/items/"), "/video")
+		if id == "4" {
+			http.Error(w, "none", 404)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"url": "https://v/" + id})
+	})
 	// page pagination: 3 pages of 2, then a short page
 	mux.HandleFunc("/paged", func(w http.ResponseWriter, r *http.Request) {
 		s.hits.Add(1)
@@ -445,6 +462,61 @@ path = "/flaky"
 	}
 	if api.hits.Load() != 3 {
 		t.Fatalf("want users + 2 post calls, got %d", api.hits.Load())
+	}
+}
+
+func TestAPIForEachSkipExisting(t *testing.T) {
+	f := setup(t)
+	api := newAPI(t)
+	f.conns.Conn["API"] = &config.Conn{Name: "API", Type: "api", BaseURL: api.URL, Auth: "bearer", Token: "tok", RateLimit: "1000/s"}
+	r := f.replication(`
+source = "API"
+target = "TGT"
+mode = "incremental"
+
+[streams.items]
+path = "/items"
+primary_key = ["id"]
+update_key = "id"
+
+[streams.videos]
+path = "/items/{items.id}/video"
+for_each = "items"
+primary_key = ["item"]
+add_columns = { item = "{items.id}" }
+skip_existing = "item"
+for_each_since = "created, 2026-01-01"
+skip_on = [404]
+`)
+	if _, err := f.engine().Run(context.Background(), r, nil); err != nil {
+		t.Fatal(err)
+	}
+	// 2 is too old, 4 has no video
+	if n := f.count("SELECT count(*) FROM videos"); n != 3 {
+		t.Fatalf("want 3 videos, got %d", n)
+	}
+	if api.hits.Load() != 5 {
+		t.Fatalf("want items + 4 video calls, got %d", api.hits.Load())
+	}
+	// second run: items is re-read in full, only 4 is tried again
+	api.hits.Store(0)
+	if _, err := f.engine().Run(context.Background(), r, nil); err != nil {
+		t.Fatal(err)
+	}
+	if api.hits.Load() != 2 {
+		t.Fatalf("want items + 1 video call, got %d", api.hits.Load())
+	}
+	if n := f.count("SELECT count(*) FROM videos"); n != 3 {
+		t.Fatalf("want 3 videos after re-run, got %d", n)
+	}
+	// 30d keeps nothing from 2026
+	r.Resolved[1].ForEachSince = "created, 30d"
+	api.hits.Store(0)
+	if _, err := f.engine().Run(context.Background(), r, nil); err != nil {
+		t.Fatal(err)
+	}
+	if api.hits.Load() != 1 {
+		t.Fatalf("want items only, got %d", api.hits.Load())
 	}
 }
 

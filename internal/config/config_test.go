@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, name, body string) string {
@@ -233,5 +234,26 @@ func TestControlCharactersRejected(t *testing.T) {
 	c := &Conn{Name: "X", Type: "postgres", URL: "postgres://u@h/db", Schema: "raw\x00"}
 	if err := c.Check(); err == nil || !strings.Contains(err.Error(), "schema") {
 		t.Fatalf("schema with NUL: %v", err)
+	}
+}
+
+func TestForEachFilters(t *testing.T) {
+	for _, c := range []struct {
+		st   Stream
+		want string
+	}{
+		{Stream{Mode: "full-refresh", Path: "/x", SkipExisting: "id"}, "skip_existing needs for_each"},
+		{Stream{Mode: "full-refresh", Path: "/x", ForEachSince: "created, 2026-01-01"}, "for_each_since needs for_each"},
+		{Stream{Mode: "full-refresh", Path: "/x", ForEach: "p", ForEachSince: "created"}, `want "field, value"`},
+		{Stream{Mode: "full-refresh", Path: "/x", ForEach: "p", SkipExisting: "id", ForEachSince: "created, 30d"}, ""},
+	} {
+		st := c.st
+		err := ValidateStream("s", &st)
+		if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%+v: want %q, got %v", c.st, c.want, err)
+		}
+	}
+	if f, v, err := ParseForEachSince("created, 7d"); err != nil || f != "created" || v.(time.Time).After(time.Now().AddDate(0, 0, -6)) {
+		t.Fatalf("7d: %v %v %v", f, v, err)
 	}
 }

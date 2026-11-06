@@ -150,9 +150,17 @@ func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, ap
 				p := f.get("for_each")
 				return strings.TrimSuffix(p, "s") + "_id = {" + p + ".id}"
 			}),
+			text("skip_existing", "Skip existing", "target column; parents already loaded are skipped").eg("product_id").def(s.SkipExisting).when(func(f *form) bool { return f.get("for_each") != "" }),
+			text("for_each_since", "For each since", "parent field, lower bound; Nd = days ago").eg("created_at, 2026-01-01   created_at, 30d").def(s.ForEachSince).when(func(f *form) bool { return f.get("for_each") != "" }).check(func(v string) error {
+				if v == "" {
+					return nil
+				}
+				_, _, err := config.ParseForEachSince(v)
+				return err
+			}),
 		)
 		if s.ForEach != "" {
-			fs[len(fs)-2].Options = []string{"", s.ForEach}
+			fs[len(fs)-4].Options = []string{"", s.ForEach}
 		}
 	} else {
 		// sql, columns and steps are shaped in explore, on the data
@@ -291,6 +299,7 @@ func streamFromFields(f *form, base config.Stream) config.Stream {
 		"page_param": &s.PageParam, "size_param": &s.SizeParam, "cursor_field": &s.CursorField,
 		"cursor_param": &s.CursorParam, "total_field": &s.TotalField, "stop_when": &s.StopWhen,
 		"params_in": &s.ParamsIn, "for_each": &s.ForEach, "sql": &s.SQL, "where": &s.Where,
+		"skip_existing": &s.SkipExisting, "for_each_since": &s.ForEachSince,
 		"steps": &s.Steps, "object": &s.Object, "update_key": &s.UpdateKey, "since_param": &s.SinceParam,
 		"sorted": &s.Sorted, "range": &s.Range, "query_timeout": &s.QueryTimeout,
 	} {
