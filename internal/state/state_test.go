@@ -344,6 +344,21 @@ func TestCancelAndWords(t *testing.T) {
 	if err := s.Cancel(ctx, id); err == nil {
 		t.Fatal("cancel of a finished run")
 	}
+	id3, _ := s.Start(ctx, "r", "x", "", "manual")
+	if err := s.Commit(ctx, id3); err != nil {
+		t.Fatal(err)
+	}
+	if cancel, commit, err := s.StopRequested(ctx, id3); cancel || !commit || err != nil {
+		t.Fatalf("%v %v %v", cancel, commit, err)
+	}
+	s.Cancel(ctx, id3) // cancel wins over a commit, and stays
+	if err := s.Commit(ctx, id3); err == nil {
+		t.Fatal("commit of a cancelled run")
+	}
+	if cancel, commit, _ := s.StopRequested(ctx, id3); !cancel || commit {
+		t.Fatalf("%v %v", cancel, commit)
+	}
+	s.Finish(ctx, id3, 0, ErrCancelled)
 	id2, _ := s.Start(ctx, "r", "x", "", "manual")
 	s.Finish(ctx, id2, 0, ErrCancelled)
 	if runs, _ := s.RunsFor(ctx, "r", "x", 1); runs[0].Status != "cancelled" || runs[0].Error != "" {

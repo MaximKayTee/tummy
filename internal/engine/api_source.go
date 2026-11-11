@@ -199,7 +199,8 @@ func (e *Engine) openAPI(ctx context.Context, a *apiRun, tgt *db.DB, s stream, t
 	}
 	i := 0
 	return &rowSource{
-		cols: cols,
+		cols:  cols,
+		whole: true,
 		next: func() ([]any, error) {
 			if i >= len(own) {
 				return nil, nil
@@ -251,6 +252,10 @@ func (a *apiRun) fetch(ctx context.Context, s stream, wm any, parents []api.Reco
 			})
 		}
 	}
+	// a commit request ends the fetch after the page or parent in hand
+	stops = append(stops, func([]api.Record) bool { return committed(ctx) })
+	limit := enough
+	enough = func(n int) bool { return limit(n) || committed(ctx) }
 	o := api.Options{OnPage: onPage, Keys: &keys}
 	if len(stops) > 0 {
 		o.StopAfter = func(p []api.Record) bool {

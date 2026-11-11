@@ -19,6 +19,7 @@ type keyMap struct {
 	Duplicate             key.Binding
 	Add, Preview          key.Binding
 	Cancel, Create        key.Binding
+	Commit                key.Binding
 	Help, Quit            key.Binding
 }
 
@@ -48,6 +49,7 @@ var keys = keyMap{
 	Add:               key.NewBinding(key.WithKeys("a")),
 	Preview:           key.NewBinding(key.WithKeys("p")),
 	Cancel:            key.NewBinding(key.WithKeys("x")),
+	Commit:            key.NewBinding(key.WithKeys("C")),
 	Create:            key.NewBinding(key.WithKeys("c")),
 	Help:              key.NewBinding(key.WithKeys("?", "f1")),
 	Quit:              key.NewBinding(key.WithKeys("q", "ctrl+c")),

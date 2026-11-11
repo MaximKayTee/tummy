@@ -266,6 +266,22 @@ func (m Model) cancelRuns(rep string, ids []int64) tea.Cmd {
 	}
 }
 
+// commitRuns asks the given runs to stop reading and write what they have loaded,
+// through the state database the running process polls.
+func (m Model) commitRuns(rep string, ids []int64) tea.Cmd {
+	st := m.opts.State
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, id := range ids {
+			if err := st.Commit(ctx, id); err != nil {
+				return statusMsg{Text: err.Error(), IsErr: true}
+			}
+		}
+		return statusMsg{Text: rep + ": commit sent"}
+	}
+}
+
 // missingFile is the file of a sqlite connection when it does not exist.
 func (m Model) missingFile(name string) string {
 	for _, c := range m.snap.Conns {

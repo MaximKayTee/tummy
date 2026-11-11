@@ -159,3 +159,77 @@ func TestRunQueryAndWatermark(t *testing.T) {
 		t.Fatal("pattern accepted")
 	}
 }
+
+// A commit request ends the fetch after the parent in hand; what is loaded is written
+// and the run is a success.
+func TestCommitRequestWritesLoaded(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	var r *config.Replication
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch req.URL.Path {
+		case "/files":
+			w.Write([]byte(`[{"id":1},{"id":2},{"id":3},{"id":4},{"id":5}]`))
+		case "/files/2/rows":
+			runs, _ := f.st.RunsFor(ctx, r.Name, "rows", 1)
+			if err := f.st.Commit(ctx, runs[0].ID); err != nil {
+				t.Error(err)
+			}
+			time.Sleep(100 * time.Millisecond)
+			fallthrough
+		default:
+			w.Write([]byte(`[{"n":1},{"n":2}]`))
+		}
+	}))
+	defer srv.Close()
+	f.conns.Conn["API"] = &config.Conn{Name: "API", Type: "api", BaseURL: srv.URL}
+	r = f.replication("source = \"API\"\ntarget = \"TGT\"\n[streams.files]\npath = \"/files\"\n[streams.rows]\npath = \"/files/{files.id}/rows\"\nfor_each = \"files\"\nadd_columns = { file = \"{files.id}\" }\n")
+	e := f.engine()
+	e.CancelPoll = 5 * time.Millisecond
+	res := f.run(e, r)
+	if len(res) != 2 || res[1].Rows != 4 {
+		t.Fatalf("%+v", res)
+	}
+	if n := f.count("SELECT count(DISTINCT file) FROM rows"); n != 2 {
+		t.Fatalf("files loaded: %d", n)
+	}
+	runs, _ := f.st.RunsFor(ctx, r.Name, "rows", 1)
+	if runs[0].Status != "success" || runs[0].Rows != 4 {
+		t.Fatalf("%+v", runs[0])
+	}
+	if err := f.st.Commit(ctx, runs[0].ID); err == nil {
+		t.Fatal("commit of a finished run")
+	}
+}
+
+// A commit request cuts a database read; the rows read so far are written.
+func TestCommitRequestDatabase(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	for i := 10; i < 5000; i++ {
+		f.exec(f.src, "INSERT INTO orders VALUES (?, 'x', 1, '2026-01-01')", i)
+	}
+	r := f.replication("source = \"SRC\"\ntarget = \"TGT\"\n[streams.orders]\n")
+	e := f.engine()
+	e.CancelPoll = 5 * time.Millisecond
+	sent := false
+	e.OnEvent = func(ev Event) {
+		if ev.Phase != PhaseLoading || sent {
+			return
+		}
+		sent = true
+		runs, _ := f.st.RunsFor(ctx, r.Name, ev.Stream, 1)
+		if err := f.st.Commit(ctx, runs[0].ID); err != nil {
+			t.Error(err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	res := f.run(e, r)
+	if n := f.count("SELECT count(*) FROM orders"); n != 0 || res[0].Rows != 0 {
+		t.Fatalf("rows %d %+v", n, res)
+	}
+	runs, _ := f.st.RunsFor(ctx, r.Name, "orders", 1)
+	if runs[0].Status != "success" {
+		t.Fatalf("%+v", runs[0])
+	}
+}

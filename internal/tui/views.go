@@ -295,7 +295,7 @@ func (m Model) shortHelp() string {
 	case viewDetail:
 		pairs := []string{"E", "edit", "a", "add", "r", "run", "ctrl+r", "run detached", "t", "dry run", "s", "run stream", "S", "stream detached", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
 		if rep, ok := m.rep(m.repName); ok && rep.Running > 0 {
-			pairs = append(pairs, "x", "cancel run")
+			pairs = append(pairs, "x", "cancel run", "C", "commit run")
 		}
 		return helpLine(pairs...)
 	case viewHistory:
@@ -378,14 +378,14 @@ func (m Model) helpPages() []helpPage {
 	case viewList:
 		section("replications", [][2]string{
 			{"enter", "streams of the replication"}, {"n", "new replication"}, {"E", "edit"}, {"D", "duplicate: a new replication with its streams and defaults"}, {"e", "on/off for the daemon"},
-			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"ctrl+r", "run now as its own process; survives quitting the TUI"}, {"t", "dry run: target table, action, source query and columns per stream, nothing written"}, {"x", "cancel a running run (y/n)"}, {"H", "run history"}, {"c", "connections"},
+			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"ctrl+r", "run now as its own process; survives quitting the TUI"}, {"t", "dry run: target table, action, source query and columns per stream, nothing written"}, {"x", "cancel a running run (y/n)"}, {"C", "commit a running run: stop reading, write what is loaded, end as ok (y/n)"}, {"H", "run history"}, {"c", "connections"},
 		})
 	case viewDetail:
 		section("streams", [][2]string{
 			{"enter", "loaded data in the target; a failed stream: its run; a bookmark: its query"}, {"p", "source preview; steps there are not saved to the stream"}, {"E", "edit the stream; its preview saves with ctrl+s"}, {"a", "add tables or an endpoint"},
 			{"e", "stream on/off; (replication): the replication"}, {"d", "delete the stream or bookmark (y/n); from a table pattern: exclude it; run history only: forget the runs"},
 			{"r", "run every stream"}, {"ctrl+r", "run every stream as its own process; survives quitting the TUI"}, {"s", "run the stream"}, {"S", "run the stream as its own process"},
-			{"x", "cancel the run (y/n)"}, {"H", "history of the stream"},
+			{"x", "cancel the run (y/n)"}, {"C", "commit the run: stop reading, write what is loaded, end as ok (y/n)"}, {"H", "history of the stream"},
 		})
 	case viewHistory:
 		section("history", [][2]string{{"enter", "run details"}, {"d", "forget the run (y/n); the one before it becomes the last"}, {"/", "filter"}})

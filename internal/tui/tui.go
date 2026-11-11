@@ -728,6 +728,8 @@ func (m Model) keyList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Sequence(m.toggleEnabled(cur), m.loadSnapshot())
 	case key.Matches(msg, keys.Cancel) && ok:
 		return m.askCancel(cur), nil
+	case key.Matches(msg, keys.Commit) && ok:
+		return m.askCommit(cur), nil
 	case key.Matches(msg, keys.New):
 		return m.newRep()
 	case key.Matches(msg, keys.Edit) && ok:
@@ -822,6 +824,8 @@ func (m Model) keyDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case key.Matches(msg, keys.Cancel):
 		return m.askCancel(rep), nil
+	case key.Matches(msg, keys.Commit):
+		return m.askCommit(rep), nil
 	case key.Matches(msg, keys.Edit) && rep.Err == "":
 		if hasStream && inFile {
 			return m.editStream(rep.Name, stream)
@@ -845,6 +849,21 @@ func (m Model) askCancel(rep replication) Model {
 	}
 	if len(ids) > 0 {
 		m.ask = &confirm{text: "cancel the run of " + rep.Name + "? y/n", onYes: func() tea.Cmd { return m.cancelRuns(rep.Name, ids) }}
+	}
+	return m
+}
+
+// askCommit asks before ending the running streams of a replication with what they
+// have loaded.
+func (m Model) askCommit(rep replication) Model {
+	var ids []int64
+	for _, r := range rep.Last {
+		if r.Status == "running" {
+			ids = append(ids, r.ID)
+		}
+	}
+	if len(ids) > 0 {
+		m.ask = &confirm{text: "commit the run of " + rep.Name + "? y/n", onYes: func() tea.Cmd { return m.commitRuns(rep.Name, ids) }}
 	}
 	return m
 }

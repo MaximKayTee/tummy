@@ -413,14 +413,33 @@ func (s *Store) Cancel(ctx context.Context, runID int64) error {
 	return nil
 }
 
+// Commit asks the process running a run to stop reading and write what it has loaded;
+// the run ends with status success.
+func (s *Store) Commit(ctx context.Context, runID int64) error {
+	res, err := s.db.ExecContext(ctx, "UPDATE runs SET cancel = 2 WHERE id = ? AND status = 'running' AND cancel <> 1", runID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("run %d is not running", runID)
+	}
+	return nil
+}
+
+// StopRequested reports whether Cancel or Commit was called for a run.
+func (s *Store) StopRequested(ctx context.Context, runID int64) (cancel, commit bool, err error) {
+	var c int
+	err = s.db.QueryRowContext(ctx, "SELECT cancel FROM runs WHERE id = ?", runID).Scan(&c)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	return c == 1, c == 2, err
+}
+
 // CancelRequested reports whether Cancel was called for a run.
 func (s *Store) CancelRequested(ctx context.Context, runID int64) (bool, error) {
-	var c int
-	err := s.db.QueryRowContext(ctx, "SELECT cancel FROM runs WHERE id = ?", runID).Scan(&c)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return c != 0, err
+	cancel, _, err := s.StopRequested(ctx, runID)
+	return cancel, err
 }
 
 // record adds a finished row for something that did not get as far as a run.

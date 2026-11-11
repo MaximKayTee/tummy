@@ -13,6 +13,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -122,6 +123,7 @@ type rowSource struct {
 	cols  []db.Column
 	next  func() ([]any, error) // nil row at the end
 	close func()
+	whole bool // every row is already read: a commit request does not cut the load
 }
 
 // stream is a resolved stream with its source table.
@@ -497,6 +499,10 @@ func (e *Engine) runStream(ctx context.Context, r *config.Replication, tgt *db.D
 			res.Err = err
 			return
 		}
+		if !src.whole && committed(ctx) {
+			e.log().Info("committed early", "stream", s.Name, "rows", n)
+			break
+		}
 		row, err := src.next()
 		if err != nil {
 			res.Err = fmt.Errorf("read %s: %w", s.Name, err)
@@ -583,10 +589,21 @@ func (sh shape) extend(row []any, loadedAt time.Time, n int64) []any {
 	return row
 }
 
+type commitKey struct{}
+
+// committed reports whether State.Commit was called for the run of ctx: reading stops
+// and what is loaded is written.
+func committed(ctx context.Context) bool {
+	f, _ := ctx.Value(commitKey{}).(*atomic.Bool)
+	return f != nil && f.Load()
+}
+
 // watchCancel returns a context that ends when State.Cancel is called for runID, with
-// cause ErrCancelled, or when ctx ends. stop ends the watch.
+// cause ErrCancelled, or when ctx ends. State.Commit sets committed on it. stop ends
+// the watch.
 func (e *Engine) watchCancel(ctx context.Context, runID int64) (_ context.Context, stop func()) {
-	sctx, cancel := context.WithCancelCause(ctx)
+	commit := new(atomic.Bool)
+	sctx, cancel := context.WithCancelCause(context.WithValue(ctx, commitKey{}, commit))
 	done := make(chan struct{})
 	go func() {
 		t := time.NewTicker(cmp.Or(e.CancelPoll, time.Second))
@@ -598,9 +615,13 @@ func (e *Engine) watchCancel(ctx context.Context, runID int64) (_ context.Contex
 			case <-sctx.Done():
 				return
 			case <-t.C:
-				if ok, err := e.State.CancelRequested(sctx, runID); err == nil && ok {
+				stopNow, write, err := e.State.StopRequested(sctx, runID)
+				if err == nil && stopNow {
 					cancel(ErrCancelled)
 					return
+				}
+				if err == nil && write {
+					commit.Store(true)
 				}
 			}
 		}
