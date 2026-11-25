@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/db"
 )
@@ -46,7 +47,7 @@ func (e *explorer) begin(what string) int {
 }
 
 // writable: statements may run on this connection.
-func (e *explorer) writable() bool { return !e.isAPI && !e.conn.ReadOnly }
+func (e *explorer) writable() bool { return e.steppable() && !e.conn.ReadOnly }
 
 // bench runs the query as compiled in full, rows read and dropped, and times it.
 func (e *explorer) bench() tea.Cmd {
@@ -112,9 +113,9 @@ func (e *explorer) applyExec(msg execMsg) tea.Cmd {
 			e.statsNote, e.statsErr = txt.FirstLine(msg.err.Error()), true
 		}
 	case msg.kind == "bench":
-		e.benchText = fmt.Sprintf("full %s rows  %s", txt.Thousands(msg.n), txt.Dur(msg.took))
+		e.benchText = fmt.Sprintf("full %s rows  %s", txt.Thousands(msg.n), txt.Rounded(msg.took))
 	case msg.kind == "exec":
-		e.setNote(fmt.Sprintf("%s rows affected  %s", txt.Thousands(msg.n), txt.Dur(msg.took)), false)
+		e.setNote(fmt.Sprintf("%s rows affected  %s", txt.Thousands(msg.n), txt.Rounded(msg.took)), false)
 	default: // dropped
 		delete(e.stats, drop)
 		e.statsNote, e.statsErr = "dropped "+txt.Clean(drop), false

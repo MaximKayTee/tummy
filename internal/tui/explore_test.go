@@ -9,9 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 	"tummy/internal/db"
@@ -110,7 +111,7 @@ func TestExplorerDB(t *testing.T) {
 	if len(e.cols) != 2 || len(e.rows) != 3 {
 		t.Fatalf("preview: cols=%d rows=%d err=%s", len(e.cols), len(e.rows), e.fetchErr)
 	}
-	v := strings.Join(e.view(80, 20), "\n")
+	v := strings.Join(plain(e.view(80, 20)), "\n")
 	if !strings.Contains(v, "● id") || !strings.Contains(v, "● v") || !strings.Contains(v, "3 rows") {
 		t.Fatalf("grid:\n%s", v)
 	}
@@ -200,7 +201,7 @@ func TestExplorerAPI(t *testing.T) {
 	if e.page != pagePreview || len(e.cols) != 3 || len(e.rows) != 2 {
 		t.Fatalf("preview: %d %d %d %s", e.page, len(e.cols), len(e.rows), e.fetchErr)
 	}
-	v := strings.Join(e.view(80, 20), "\n")
+	v := strings.Join(plain(e.view(80, 20)), "\n")
 	if !strings.Contains(v, "meta_k") || !strings.Contains(v, "bool") {
 		t.Fatalf("api grid:\n%s", v)
 	}
@@ -290,7 +291,7 @@ func TestEnterShowsTargetData(t *testing.T) {
 	if len(e.rows) != 3 || len(e.cols) != 2 {
 		t.Fatalf("target rows: %d %s", len(e.rows), e.fetchErr)
 	}
-	if !strings.Contains(strings.Join(e.view(100, 20), "\n"), "TGT") {
+	if !strings.Contains(strings.Join(plain(e.view(100, 20)), "\n"), "TGT") {
 		t.Fatal("head names the target connection")
 	}
 	if e.update(keyRunes("t")); e.page != pagePalette {
@@ -311,7 +312,7 @@ func TestPreviewStream(t *testing.T) {
 	}
 	e := m.wiz.(*explorer)
 	run(e, e.start())
-	v := strings.Join(e.view(80, 20), "\n")
+	v := strings.Join(plain(e.view(80, 20)), "\n")
 	if e.page != pagePreview || len(e.cols) != 2 || !strings.Contains(v, "3 rows") || !strings.Contains(v, "sql›") || e.repName != "alpha" {
 		t.Fatalf("sql stream preview: %d %d %q\n%s", e.page, len(e.cols), e.repName, v)
 	}
@@ -350,7 +351,7 @@ func TestPreviewWidthsAndValue(t *testing.T) {
 	}
 	e.update(keyRunes("j"))
 	e.update(keyRunes("v"))
-	v := strings.Join(e.view(80, 20), "\n")
+	v := strings.Join(plain(e.view(80, 20)), "\n")
 	if !e.showVal || !strings.Contains(v, "row 2 of 3") || !strings.Contains(v, "\n  b") {
 		t.Fatalf("value box:\n%s", v)
 	}
@@ -358,7 +359,7 @@ func TestPreviewWidthsAndValue(t *testing.T) {
 	if e.showVal {
 		t.Fatal("any key closes the value box")
 	}
-	v = strings.Join(e.view(80, 20), "\n")
+	v = strings.Join(plain(e.view(80, 20)), "\n")
 	if !strings.Contains(v, "› ") {
 		t.Fatalf("row cursor missing:\n%s", v)
 	}
@@ -428,7 +429,7 @@ func TestWildcardCarriesSettings(t *testing.T) {
 	// exploring never writes the file
 	e.update(keyRight)
 	e.update(keySpace)
-	if _, cmd := e.update(tea.KeyMsg{Type: tea.KeyCtrlS}); cmd != nil || e.canSaveBack() {
+	if _, cmd := e.update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}); cmd != nil || e.canSaveBack() {
 		t.Fatal("ctrl+s on an explored table")
 	}
 	for _, rs := range readRep(t, opts, "wild").Resolved {
@@ -474,7 +475,7 @@ func TestStepsPanelAndPalette(t *testing.T) {
 	if e.focus != focusGrid {
 		t.Fatal("focus stays on the grid")
 	}
-	v := strings.Join(e.view(120, 24), "\n")
+	v := strings.Join(plain(e.view(120, 24)), "\n")
 	if !strings.Contains(v, `1  filter "id" > 1`) || !strings.Contains(v, "│") || !strings.Contains(v, `WHERE "id" > 1`) {
 		t.Fatalf("panel:\n%s", v)
 	}
@@ -614,7 +615,7 @@ func TestStepsPanelAndPalette(t *testing.T) {
 // The old crash: a step that narrows the columns while the cursor sits further right.
 func TestNarrowingStepKeepsCursorValid(t *testing.T) {
 	e := openThings(t, testHome(t))
-	e.view(120, 24)
+	plain(e.view(120, 24))
 	e.update(keyRight)
 	e.stepEdit = -1
 	run(e, e.applyStep(steps.Step{Op: "keep", Args: "id"}))
@@ -624,8 +625,8 @@ func TestNarrowingStepKeepsCursorValid(t *testing.T) {
 	e.update(keyTab)
 	e.update(keyTab)
 	e.update(keyRunes(">"))
-	e.view(120, 24)
-	e.view(60, 24)
+	plain(e.view(120, 24))
+	plain(e.view(60, 24))
 }
 
 func TestPipelineResetsOnAnotherTable(t *testing.T) {
@@ -686,7 +687,7 @@ func TestSaveBackToStream(t *testing.T) {
 		t.Fatal("esc asks with unsaved steps")
 	}
 	e.update(keyRunes("n"))
-	e.update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	e.update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	s := draftStream()
 	if s.Steps != "limit 2 | keep id" || len(s.Select) != 0 || s.Limit != 5 || !s.Disabled || s.QueryTimeout != "30s" {
 		t.Fatalf("saved back: %+v (%s)", s, e.note)
@@ -716,7 +717,7 @@ func TestFocusAndNarrowPanel(t *testing.T) {
 	e := openThings(t, testHome(t))
 	run(e, e.applyStep(steps.Step{Op: "limit", Args: "2"}))
 	// narrow: tab shows the steps and the sql in place of the grid
-	v := strings.Join(e.view(80, 20), "\n")
+	v := strings.Join(plain(e.view(80, 20)), "\n")
 	if !strings.Contains(v, "● id") {
 		t.Fatalf("grid first:\n%s", v)
 	}
@@ -727,7 +728,7 @@ func TestFocusAndNarrowPanel(t *testing.T) {
 	if e.focus != focusSteps {
 		t.Fatal("tab focuses the steps when narrow")
 	}
-	v = strings.Join(e.view(80, 20), "\n")
+	v = strings.Join(plain(e.view(80, 20)), "\n")
 	if !strings.Contains(v, "1  limit 2") || !strings.Contains(v, "LIMIT 2") || strings.Contains(v, "● id") {
 		t.Fatalf("steps in place of the grid:\n%s", v)
 	}
@@ -740,7 +741,7 @@ func TestFocusAndNarrowPanel(t *testing.T) {
 	if e.focus != focusGrid {
 		t.Fatal("tab back to the grid")
 	}
-	e.view(120, 20)
+	plain(e.view(120, 20))
 	e.update(keyTab)
 	if e.focus != focusSteps {
 		t.Fatal("tab with the panel")
@@ -748,7 +749,7 @@ func TestFocusAndNarrowPanel(t *testing.T) {
 	// a failing step keeps the panel up
 	e.pipeline = append(e.pipeline, steps.Step{Op: "keep", Args: "nope"})
 	run(e, e.fetch())
-	v = strings.Join(e.view(120, 20), "\n")
+	v = strings.Join(plain(e.view(120, 20)), "\n")
 	if e.fetchErr == "" || !strings.Contains(v, "2  keep nope") {
 		t.Fatalf("panel with an error:\n%s", v)
 	}
@@ -778,7 +779,7 @@ func TestStepEditsUseColumnsBeforeTheStep(t *testing.T) {
 	e.focus = focusGrid
 	e.colCur = 1
 	e.update(keySpace)
-	v := strings.Join(e.view(120, 24), "\n")
+	v := strings.Join(plain(e.view(120, 24)), "\n")
 	if !strings.Contains(v, "keep id  ticks") {
 		t.Fatalf("ticks shown as a keep:\n%s", v)
 	}
@@ -1138,7 +1139,7 @@ func TestCellsEscapeControls(t *testing.T) {
 	e.rows[0][1] = strings.Repeat("ü", 300)
 	e.colCur = 1
 	e.showVal = true
-	for _, l := range e.view(60, 10) {
+	for _, l := range plain(e.view(60, 10)) {
 		if !strings.Contains(l, "\ufffd") {
 			continue
 		}
@@ -1158,16 +1159,16 @@ func TestLeftStaysInPreview(t *testing.T) {
 	opts := testHome(t)
 	e := openThings(t, opts)
 	e.update(keyRight)
-	if res, _ := e.update(tea.KeyMsg{Type: tea.KeyLeft}); res != wizContinue || e.colCur != 0 {
+	if res, _ := e.update(tea.KeyPressMsg{Code: tea.KeyLeft}); res != wizContinue || e.colCur != 0 {
 		t.Fatal("left moves one column first")
 	}
-	if res, _ := e.update(tea.KeyMsg{Type: tea.KeyLeft}); res != wizContinue || e.page != pagePreview || e.colCur != 0 {
+	if res, _ := e.update(tea.KeyPressMsg{Code: tea.KeyLeft}); res != wizContinue || e.page != pagePreview || e.colCur != 0 {
 		t.Fatalf("left on the first column stays: page %d col %d", e.page, e.colCur)
 	}
-	if res, _ := e.update(tea.KeyMsg{Type: tea.KeyEsc}); res != wizContinue || e.page != pageTables {
+	if res, _ := e.update(tea.KeyPressMsg{Code: tea.KeyEscape}); res != wizContinue || e.page != pageTables {
 		t.Fatalf("esc goes back to tables: %d", e.page)
 	}
-	if res, _ := e.update(tea.KeyMsg{Type: tea.KeyLeft}); res != wizCancel {
+	if res, _ := e.update(tea.KeyPressMsg{Code: tea.KeyLeft}); res != wizCancel {
 		t.Fatal("left on the table list leaves the explorer")
 	}
 }

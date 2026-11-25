@@ -36,14 +36,14 @@ func TestExplorerStats(t *testing.T) {
 			t.Fatalf("%s: %s", key, e.statsNote)
 		}
 	}
-	if v := strings.Join(e.view(100, 20), "\n"); strings.Contains(v, "ROWS") {
+	if v := strings.Join(plain(e.view(100, 20)), "\n"); strings.Contains(v, "ROWS") {
 		t.Fatalf("stats shown before any refresh:\n%s", v)
 	}
 	step("s")
 	if s := e.stats["things"]; s.Rows != 3 || !s.Exact || s.Bytes <= 0 {
 		t.Fatalf("things after s: %+v", s)
 	}
-	v := strings.Join(e.view(100, 20), "\n")
+	v := strings.Join(plain(e.view(100, 20)), "\n")
 	if !strings.Contains(v, "ROWS") || !strings.Contains(v, "2 tables refreshed") {
 		t.Fatalf("view after s:\n%s", v)
 	}
@@ -65,7 +65,7 @@ func TestExplorerStats(t *testing.T) {
 	if s.Rows != 5 || s.PrevRows != 3 || !s.Exact {
 		t.Fatalf("things after c: %+v", s)
 	}
-	if v := strings.Join(e.view(100, 20), "\n"); !strings.Contains(v, "+2") || !strings.Contains(v, "things: 5 rows") {
+	if v := strings.Join(plain(e.view(100, 20)), "\n"); !strings.Contains(v, "+2") || !strings.Contains(v, "things: 5 rows") {
 		t.Fatalf("view after c:\n%s", v)
 	}
 

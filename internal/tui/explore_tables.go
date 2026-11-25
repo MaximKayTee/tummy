@@ -8,18 +8,30 @@ import (
 	"reflect"
 	"strings"
 	"time"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	txt "github.com/MaximKayTee/gotuitools/text"
+
+	"tummy/internal/blob"
 	"tummy/internal/config"
 	"tummy/internal/db"
+	"tummy/internal/probe"
 )
 
 func (e *explorer) discover() tea.Cmd {
 	e.loading, e.listSeq = true, nextSeq()
 	h, name, seq := e.h, e.conn.Name, e.listSeq
+	if e.files {
+		c := e.conn
+		return func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			res, err := probe.Conn(ctx, c, "")
+			return discoverMsg{Conn: name, Tables: res.Tables, Err: err, seq: seq}
+		}
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
@@ -55,6 +67,14 @@ func (e *explorer) visibleTables() []string {
 		return e.sortTables(e.tables)
 	}
 	var out []string
+	if e.filePattern() {
+		for _, t := range e.tables {
+			if blob.Match(e.filter.Value(), t) {
+				out = append(out, t)
+			}
+		}
+		return out
+	}
 	for _, t := range e.tables {
 		if strings.Contains(strings.ToLower(t), f) {
 			out = append(out, t)
@@ -62,6 +82,9 @@ func (e *explorer) visibleTables() []string {
 	}
 	return e.sortTables(out)
 }
+
+// filePattern: the filter of a file list is a pattern, matched as a stream path is.
+func (e *explorer) filePattern() bool { return e.files && blob.IsPattern(e.filter.Value()) }
 
 // listItem is a row of the table list: a bookmark, or a table.
 type listItem struct {
@@ -94,11 +117,23 @@ func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			return wizContinue, nil
 		}
 		var cmd tea.Cmd
-		e.filter, cmd = e.filter.Update(msg)
+		e.filter, cmd = e.filter.Update(teaMsg(msg))
 		e.cur = 0
 		return wizContinue, cmd
 	}
 	vis := e.visibleItems()
+	if e.files {
+		switch msg.String() {
+		case "s", "c", "D", "d", "o", "S":
+			return wizContinue, nil
+		case "p":
+			p := e.filter.Value()
+			if !e.filePattern() {
+				p = blob.Literal(p) + "*"
+			}
+			return wizContinue, e.openFiles(p)
+		}
+	}
 	switch msg.String() {
 	case "esc", "q", "left", "h":
 		return wizCancel, nil
@@ -109,7 +144,7 @@ func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		e.cur = max(e.cur-1, 0)
 	case "down", "j":
 		e.cur = min(e.cur+1, max(len(vis)-1, 0))
-	case "pgdown", " ", "ctrl+d":
+	case "pgdown", "space", "ctrl+d":
 		e.cur = min(e.cur+max(e.tableRows, 1), max(len(vis)-1, 0))
 	case "pgup", "ctrl+u":
 		e.cur = max(e.cur-max(e.tableRows, 1), 0)
@@ -162,8 +197,20 @@ func (e *explorer) keyTables(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	return wizContinue, nil
 }
 
+// openFiles previews the files a stream path matches.
+func (e *explorer) openFiles(pattern string) tea.Cmd {
+	e.resetPreview()
+	e.streamName = ""
+	e.openSpec("", config.Stream{Path: pattern})
+	e.page = pagePreview
+	return e.fetch()
+}
+
 // openTable previews a table with a fresh pipeline; under a wildcard, with its settings.
 func (e *explorer) openTable(name string) tea.Cmd {
+	if e.files {
+		return e.openFiles(blob.Literal(name))
+	}
 	e.resetPreview()
 	e.table = name
 	e.streamName = ""
@@ -211,6 +258,9 @@ func (e *explorer) openSpec(name string, spec config.Stream) {
 		e.apiBase = spec
 		e.endpoint = e.endpointForm(spec)
 		e.wantSelect, e.spec.Select = spec.Select, nil
+	case e.files:
+		e.table = ""
+		e.wantSelect, e.spec.Select = spec.Select, nil
 	case spec.SQL == "":
 		e.table = name
 		if len(e.pipeline) == 0 && len(spec.Select) > 0 {
@@ -236,7 +286,17 @@ func (e *explorer) tablesView(width, height int) []string {
 	default:
 		out = append(out, "")
 	}
+	if e.files && e.filter.Value() != "" && !e.loading && e.loadErr == "" {
+		n := len(e.visibleTables())
+		what := txt.Plural(int64(n), "file")
+		if e.filePattern() {
+			what += " match"
+		}
+		out[len(out)-1] = "  " + sDim.Render(what)
+	}
 	switch {
+	case e.loading && e.files:
+		return append(out, "  "+sWarn.Render("◐ files"))
 	case e.loading:
 		return append(out, "  "+sWarn.Render("◐ tables"))
 	case e.loadErr != "":
@@ -250,7 +310,7 @@ func (e *explorer) tablesView(width, height int) []string {
 	nameW := width
 	if withStats {
 		nameW = width - statsWidth - 2
-		out = append(out, sDim.Render(pad("  TABLE", nameW, false)+"  "+statsHeader()))
+		out = append(out, sDim.Render(txt.Fit("  TABLE", nameW)+"  "+statsHeader()))
 	}
 	markW := max(min(width/3, 40), 12)
 	rows := max(height-len(out), 1)
@@ -266,12 +326,12 @@ func (e *explorer) tablesView(width, height int) []string {
 		var line string
 		switch {
 		case it.mark != nil:
-			line = pad("  "+txt.Clean(it.name), markW, false) + "  " + sDim.Render(ansi.Truncate(txt.Clean(markText(it.mark)), max(width-markW-2, 4), "…"))
+			line = txt.Fit("  "+txt.Clean(it.name), markW) + "  " + sDim.Render(ansi.Truncate(txt.Clean(markText(it.mark)), max(width-markW-2, 4), "…"))
 		case withStats:
 			s, ok := e.stats[it.name]
-			line = pad("  "+txt.Clean(it.name), nameW, false) + "  " + statsColumns(s, ok)
+			line = txt.Fit("  "+txt.Clean(it.name), nameW) + "  " + statsColumns(s, ok)
 		default:
-			line = pad("  "+txt.Clean(it.name), width, false)
+			line = txt.Fit("  "+txt.Clean(it.name), width)
 		}
 		if i == e.cur {
 			line = selectedLine(line, width)

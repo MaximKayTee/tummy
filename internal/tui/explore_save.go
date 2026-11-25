@@ -6,12 +6,14 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 	"tummy/internal/db"
+	"tummy/internal/engine"
 )
 
 const newRepOption = "new replication"
@@ -110,10 +112,13 @@ func (e *explorer) applyEdits(s *config.Stream, ticked []string, isNew bool) err
 			api.Range, api.Limit, api.Disabled, api.QueryTimeout = s.Range, s.Limit, s.Disabled, s.QueryTimeout
 			*s = api
 		}
+		if e.files {
+			s.Path, s.Sheet = e.spec.Path, e.spec.Sheet
+		}
 	} else if e.spec.SQL != e.baseSQL {
 		s.SQL = e.spec.SQL
 	}
-	if e.isAPI {
+	if !e.steppable() {
 		switch {
 		case !ticksChanged && !isNew:
 		case partial:
@@ -174,7 +179,7 @@ func (e *explorer) toTargetPick() tea.Cmd {
 	}
 	var targets []string
 	for _, n := range e.conns.Names() {
-		if c := e.conns.Conn[n]; c.Type != "api" && !c.ReadOnly {
+		if c := e.conns.Conn[n]; engine.IsDatabase(c.Type) && !c.ReadOnly {
 			targets = append(targets, n) // the source too: a copy into another schema
 		}
 	}
@@ -260,6 +265,8 @@ func (e *explorer) defaultStreamName() string {
 	case e.isAPI:
 		r := strings.NewReplacer("/", "_", "{", "", "}", "", ".", "_")
 		return strings.Trim(r.Replace(e.spec.Path), "_")
+	case e.files:
+		return fileStreamName(e.spec.Path)
 	case e.spec.SQL != "":
 		return "query"
 	}
@@ -287,7 +294,7 @@ func (e *explorer) streamForm(title, name string, s config.Stream) *form {
 		case db.Int, db.Float, db.Decimal, db.Date, db.Timestamp:
 			return true
 		case db.String:
-			return e.isAPI // dates come as text
+			return !e.steppable() // dates come as text
 		}
 		return false
 	}
@@ -298,7 +305,7 @@ func (e *explorer) streamForm(title, name string, s config.Stream) *form {
 		}
 	}
 	fields := []*field{text("name", "Name", "users   the target table unless object is set").def(name).required()}
-	for _, fl := range streamFieldsOf(s, base, kinds, e.parents.get, e.isAPI) {
+	for _, fl := range streamFieldsOf(s, base, kinds, e.parents.get, kindOfConn(e.conn.Type)) {
 		switch fl.Key {
 		case "object":
 			opts := []string{""}
@@ -310,7 +317,7 @@ func (e *explorer) streamForm(title, name string, s config.Stream) *form {
 					opts = append(opts, p)
 				}
 			}
-			if e.isAPI {
+			if !e.steppable() {
 				fields = append(fields, multi("select", "Columns", "", e.colNames(), s.Columns(e.colNames())).fixed())
 			}
 			obj := combo("object", "Object", fl.Help, opts...).empty("stream name").def(s.Object)

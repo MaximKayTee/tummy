@@ -8,10 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/db"
 	"tummy/internal/steps"
@@ -389,10 +390,10 @@ func (e *stepEditor) valueKeys(msg tea.KeyMsg) (formResult, tea.Cmd, bool) {
 		return formContinue, nil, false
 	}
 	switch msg.String() {
-	case " ":
+	case "space":
 		if d.filter.Value() != "" {
 			var cmd tea.Cmd
-			d.filter, cmd = d.filter.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+			d.filter, cmd = d.filter.Update(tea.KeyPressMsg{Code: tea.KeySpace, Text: " "})
 			d.cur = 0
 			return formContinue, cmd, true
 		}

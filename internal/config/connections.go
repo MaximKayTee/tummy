@@ -157,7 +157,7 @@ func (c *Conn) check() error {
 	}
 	set := func(s string) bool { return s != "" && !hasEnvRef(s) }
 	if c.Type == "" {
-		return fail(`type is required: postgres, mysql, mssql, sqlite or api`)
+		return fail(`type is required: postgres, mysql, mssql, sqlite, api or azblob`)
 	}
 	if err := checkControls(reflect.ValueOf(*c)); err != nil {
 		return fail("%v", err)
@@ -189,8 +189,11 @@ func (c *Conn) check() error {
 		}
 		return nil
 	}
+	if c.Type == "azblob" {
+		return c.checkBlob(fail, set)
+	}
 	if _, err := db.DialectFor(c.Type); err != nil {
-		return fail("type %q: want postgres, mysql, mssql, sqlite or api", c.Type)
+		return fail("type %q: want postgres, mysql, mssql, sqlite, api or azblob", c.Type)
 	}
 	if t, _ := db.DialectFor(c.Type); t.Name() == "sqlite" {
 		if c.Path == "" {

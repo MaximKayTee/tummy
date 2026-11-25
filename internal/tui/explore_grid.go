@@ -8,12 +8,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"tummy/internal/txt"
 	"unicode/utf8"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 	"tummy/internal/db"
@@ -30,7 +31,7 @@ type previewMsg struct {
 	Total      int            // rows the query returns in all; -1 unknown
 	Counted    string         // query Total was counted for
 	Complete   bool           // no rows beyond these
-	Parents    string         // for_each: "3 of 10 users"
+	Parents    string         // for_each: "3 of 10 users"; files: "2 of 5 files"
 	ParentCols *parentColsMsg // for_each: the parent's columns
 	Keys       []apiKey       // api: top-level keys of the response
 	WM         *watermarkInfo
@@ -73,7 +74,7 @@ func (e *explorer) runName() string {
 
 // needsWatermark: an incremental stream of a replication reads its target's high mark.
 func (e *explorer) needsWatermark() bool {
-	return !e.isAPI && e.repName != "" && e.streamName != "" &&
+	return !e.isAPI && !e.files && e.repName != "" && e.streamName != "" &&
 		e.spec.Mode == "incremental" && e.spec.UpdateKey != ""
 }
 
@@ -116,6 +117,14 @@ func (e *explorer) fetch() tea.Cmd {
 		e.limit = 1
 	}
 	seq, n := e.fetchSeq, e.limit
+	if e.files {
+		c, spec := e.conn, e.spec
+		return func() tea.Msg {
+			msg := filesFetch(c, spec, previewLimit*n)
+			msg.seq = seq
+			return msg
+		}
+	}
 	if e.isAPI {
 		run := e.apiFetch(e.spec, n)
 		return func() tea.Msg {
@@ -464,7 +473,7 @@ func (e *explorer) currentNote() string {
 
 // ---------- preview keys ----------
 
-func (e *explorer) steppable() bool { return !e.isAPI }
+func (e *explorer) steppable() bool { return !e.isAPI && !e.files }
 
 // panelBeside: wide enough for the steps panel next to the grid; narrower, tab shows it
 // in place of the grid. Before the first frame the width is unknown.
@@ -557,7 +566,7 @@ func (e *explorer) keyPreview(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		if len(e.rows) > 0 && len(e.cols) > 0 {
 			e.showVal = true
 		}
-	case " ", "x":
+	case "space", "x":
 		if e.colCur < len(e.cols) {
 			n := e.cols[e.colCur].Name
 			e.ticked[n] = !e.ticked[n]
@@ -608,6 +617,9 @@ func (e *explorer) leaveNow() (wizResult, tea.Cmd) {
 	}
 	e.resetPreview()
 	e.page = pageTables
+	if e.files && len(e.tables) == 0 && !e.loading {
+		return wizContinue, e.discover()
+	}
 	return wizContinue, nil
 }
 
@@ -627,7 +639,7 @@ func (e *explorer) dirty() bool {
 }
 
 func (e *explorer) openSQL() tea.Cmd {
-	if e.isAPI {
+	if !e.steppable() {
 		return nil
 	}
 	e.editSQL = true
@@ -666,7 +678,7 @@ func (e *explorer) keySQL(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 		return wizContinue, e.fetch()
 	}
 	var cmd tea.Cmd
-	e.sqlInput, cmd = e.sqlInput.Update(msg)
+	e.sqlInput, cmd = e.sqlInput.Update(teaMsg(msg))
 	return wizContinue, cmd
 }
 
@@ -783,7 +795,7 @@ func (e *explorer) previewView(width, height int) []string {
 		grid = append(grid, "")
 	}
 	for i := range grid {
-		line := pad(grid[i], gridW, false) + sRule.Render("│")
+		line := txt.Fit(grid[i], gridW) + sRule.Render("│")
 		if i < len(panel) {
 			line += panel[i]
 		}
@@ -796,8 +808,11 @@ func (e *explorer) previewView(width, height int) []string {
 func (e *explorer) previewHead(width int) string {
 	what := e.table
 	switch {
-	case e.isAPI:
+	case e.isAPI || e.files:
 		what = e.spec.Path
+		if e.files && e.spec.Sheet != "" {
+			what += " › " + e.spec.Sheet
+		}
 	case e.spec.SQL != "" || e.editSQL:
 		what = cmpOr(e.streamName, "query")
 	}
@@ -835,7 +850,7 @@ func (e *explorer) previewHead(width int) string {
 		parts = append(parts, sDim.Render(txt.Clean(b)))
 	}
 	head := " " + strings.Join(parts, "  ")
-	if t := sDim.Render(txt.Dur(e.took)); len(e.cols) > 0 && lipgloss.Width(head)+2+lipgloss.Width(t) <= width {
+	if t := sDim.Render(txt.Rounded(e.took)); len(e.cols) > 0 && lipgloss.Width(head)+2+lipgloss.Width(t) <= width {
 		head += "  " + t
 	}
 	return head
@@ -903,7 +918,7 @@ func (e *explorer) grid(width, height int) []string {
 	}
 
 	render := func(i int, s string, header bool) string {
-		s = pad(s, widths[i], false)
+		s = txt.Fit(s, widths[i])
 		switch {
 		case header && i == e.colCur:
 			return sSelected.Render(s)
@@ -925,7 +940,7 @@ func (e *explorer) grid(width, height int) []string {
 			mark = "● "
 		}
 		hdr = append(hdr, render(i, mark+txt.Clean(e.cols[i].Name), true))
-		typ = append(typ, sDim.Render(pad("  "+e.cols[i].Kind.String(), widths[i], false)))
+		typ = append(typ, sDim.Render(txt.Fit("  "+e.cols[i].Kind.String(), widths[i])))
 	}
 	more := ""
 	if last < len(e.cols) {
@@ -945,7 +960,7 @@ func (e *explorer) grid(width, height int) []string {
 			}
 			s := cell(v, e.cols[i].Kind)
 			if r == e.rowCur && i == e.colCur {
-				cells = append(cells, sSelected.Render(pad(s, widths[i], false)))
+				cells = append(cells, sSelected.Render(txt.Fit(s, widths[i])))
 			} else {
 				cells = append(cells, render(i, s, false))
 			}

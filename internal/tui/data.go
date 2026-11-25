@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"tummy/internal/config"
 	"tummy/internal/db"

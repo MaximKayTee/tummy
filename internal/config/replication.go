@@ -52,6 +52,9 @@ type Stream struct {
 	StopWhen   string `toml:"stop_when"`   // JMESPath on the response; truthy stops paging
 	TotalField string `toml:"total_field"` // JMESPath to the total record count; paging stops at it
 	ParamsIn   string `toml:"params_in"`   // query (default) or body: where page, size and cursor go
+
+	// azblob: path is the file pattern
+	Sheet string `toml:"sheet"` // xlsx: the sheet to read; default the first
 }
 
 type Replication struct {

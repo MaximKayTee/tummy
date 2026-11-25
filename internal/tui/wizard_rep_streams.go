@@ -8,9 +8,10 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/api"
 	"tummy/internal/config"
@@ -102,7 +103,7 @@ func (w *repWizard) keyStreams(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	case "a":
 		return wizContinue, w.add()
 	case "s":
-		if !w.isAPI() {
+		if !w.noTables() {
 			return wizContinue, w.exploreSQL()
 		}
 	case "enter":
@@ -134,10 +135,10 @@ func (w *repWizard) keyStreams(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	return wizContinue, nil
 }
 
-// add opens the endpoint form for an API source, else the table list.
+// add opens the stream form for an API or container source, else the table list.
 func (w *repWizard) add() tea.Cmd {
 	w.err = ""
-	if w.isAPI() {
+	if w.noTables() {
 		w.editing = -1
 		w.stream = w.streamForm(config.StreamDraft{Stream: w.draft.Defaults}, nil)
 		return w.stream.focus()
@@ -160,7 +161,7 @@ func (w *repWizard) edit(i int) tea.Cmd {
 		return nil
 	}
 	w.editing, w.err, w.colsErr = i, "", ""
-	if w.isAPI() || sd.Stream.SQL != "" || strings.ContainsAny(sd.Name, "*?[") {
+	if w.noTables() || sd.Stream.SQL != "" || strings.ContainsAny(sd.Name, "*?[") {
 		w.stream = w.streamForm(sd, nil)
 		return w.stream.focus()
 	}
@@ -349,7 +350,7 @@ func (w *repWizard) openPicker() {
 	}
 	items := w.tableOptions()
 	for _, s := range w.draft.Streams { // streams named by hand stay listed
-		if !slices.Contains(items, s.Name) && !w.isAPI() {
+		if !slices.Contains(items, s.Name) && !w.noTables() {
 			items = append(items, s.Name)
 		}
 	}
@@ -416,9 +417,9 @@ func (w *repWizard) coveredBy() map[string]string {
 
 func (w *repWizard) keyPick(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 	if msg.String() == "ctrl+s" {
-		msg = tea.KeyMsg{Type: tea.KeyEnter}
+		msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 	}
-	if msg.String() == "ctrl+e" && !w.isAPI() {
+	if msg.String() == "ctrl+e" && !w.noTables() {
 		if item, ok := w.pick.current(); ok && !strings.ContainsAny(item, "*?[") {
 			return wizContinue, w.previewTable(item)
 		}

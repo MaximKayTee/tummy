@@ -5,10 +5,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"tummy/internal/txt"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 )
@@ -31,7 +32,7 @@ func (w *repWizard) toReview() tea.Cmd {
 	} else {
 		lines, w.changes = styleDiff(diff)
 	}
-	w.review = viewport.New(80, 10)
+	w.review = viewport.New(viewport.WithWidth(80), viewport.WithHeight(10))
 	w.review.SetContent(strings.Join(lines, "\n"))
 	w.step = stepReview
 	return nil
@@ -91,8 +92,8 @@ func (w *repWizard) reviewView(width, height int) []string {
 	case w.original != "" && w.changes == 0:
 		out = append(out, " "+sDim.Render("no changes"), "")
 	}
-	w.review.Width = max(width-2, 10)
-	w.review.Height = max(height-len(out), 3)
+	w.review.SetWidth(max(width-2, 10))
+	w.review.SetHeight(max(height-len(out), 3))
 	for _, l := range strings.Split(w.review.View(), "\n") {
 		out = append(out, " "+l)
 	}
@@ -132,7 +133,7 @@ func overrides(s, d config.Stream) string {
 		parts = append(parts, "steps")
 	}
 	if len(s.Select) > 0 {
-		parts = append(parts, plural(len(s.Select), "col"))
+		parts = append(parts, txt.Plural(int64(len(s.Select)), "col"))
 	}
 	if s.Limit > 0 {
 		add("limit", strconv.Itoa(s.Limit))

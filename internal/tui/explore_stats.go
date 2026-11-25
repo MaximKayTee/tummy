@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/db"
 	"tummy/internal/state"
-	"tummy/internal/txt"
 )
 
 // Row counts and sizes of a connection's tables: read from the catalog on s, counted
@@ -90,7 +91,7 @@ func (e *explorer) refreshStats() tea.Cmd {
 		if err := st.SaveTableStats(ctx, name, time.Now(), true, rows); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s refreshed", plural(len(list), "table")), nil
+		return fmt.Sprintf("%s refreshed", txt.Plural(int64(len(list)), "table")), nil
 	})
 }
 
@@ -117,7 +118,7 @@ func (e *explorer) countTable(name string) tea.Cmd {
 		if err := st.SaveTableStats(ctx, conn, time.Now(), false, []state.TableStat{row}); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("%s: %s rows, counted in %s", name, txt.Thousands(n), txt.Dur(time.Since(start))), nil
+		return fmt.Sprintf("%s: %s rows, counted in %s", name, txt.Thousands(n), txt.Rounded(time.Since(start))), nil
 	})
 }
 
@@ -167,7 +168,7 @@ func (e *explorer) sortTables(names []string) []string {
 const statsWidth = 14 + 2 + 10 + 2 + 12 + 2 + 11
 
 func statsHeader() string {
-	return pad("ROWS", 14, true) + "  " + pad("SIZE", 10, true) + "  " + pad("CHANGE", 12, true) + "  " + pad("READ", 11, false)
+	return txt.FitLeft("ROWS", 14) + "  " + txt.FitLeft("SIZE", 10) + "  " + txt.FitLeft("CHANGE", 12) + "  " + txt.Fit("READ", 11)
 }
 
 func statsColumns(s state.TableStat, ok bool) string {
@@ -189,7 +190,7 @@ func statsColumns(s state.TableStat, ok bool) string {
 			change = "−" + txt.Thousands(-d)
 		}
 	}
-	return pad(rows, 14, true) + "  " + pad(sizeText(s.Bytes), 10, true) + "  " + pad(change, 12, true) + "  " + pad(ago(s.Refreshed), 11, false)
+	return txt.FitLeft(rows, 14) + "  " + txt.FitLeft(sizeText(s.Bytes), 10) + "  " + txt.FitLeft(change, 12) + "  " + txt.Fit(txt.Since(s.Refreshed, time.Now()), 11)
 }
 
 // sizeText formats bytes in binary units; "—" when unknown.

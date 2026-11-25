@@ -44,7 +44,7 @@ func TestExecuteStatement(t *testing.T) {
 	if e.fetchErr == "" || !strings.Contains(e.fetchErr, "garbage here") {
 		t.Fatalf("error shown in full: %q", e.fetchErr)
 	}
-	if v := strings.Join(e.view(100, 24), "\n"); !strings.Contains(v, "garbage") {
+	if v := strings.Join(plain(e.view(100, 24)), "\n"); !strings.Contains(v, "garbage") {
 		t.Fatalf("view:\n%s", v)
 	}
 	db, _ := sql.Open("sqlite", filepath.Join(opts.Home, "src.db"))
@@ -128,7 +128,7 @@ func TestDropTableFromPreview(t *testing.T) {
 	if e.page != pagePreview {
 		t.Fatalf("page=%d", e.page)
 	}
-	if v := strings.Join(e.view(100, 24), "\n"); !strings.Contains(v, "◐ dropping things") {
+	if v := strings.Join(plain(e.view(100, 24)), "\n"); !strings.Contains(v, "◐ dropping things") {
 		t.Fatalf("head:\n%s", v)
 	}
 	_, cmd = e.update(cmd())
@@ -148,7 +148,7 @@ func TestSchemaBox(t *testing.T) {
 	if !e.showCols {
 		t.Fatal("i opens the schema")
 	}
-	v := strings.Join(e.view(100, 24), "\n")
+	v := strings.Join(plain(e.view(100, 24)), "\n")
 	for _, want := range []string{"schema", "2 columns", "COLUMN", "KIND", "TYPE", "FIRST VALUE", "id", "int", "a"} {
 		if !strings.Contains(v, want) {
 			t.Fatalf("schema box lacks %q:\n%s", want, v)

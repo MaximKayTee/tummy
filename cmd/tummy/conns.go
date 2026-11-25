@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"tummy/internal/blob"
 	"tummy/internal/probe"
 )
 
@@ -60,9 +61,12 @@ func connsCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if c.Type == "api" {
+			switch c.Type {
+			case "api":
 				fmt.Printf("ok  HTTP %d  %s\n", res.Status, res.Took.Round(time.Millisecond))
-			} else {
+			case "azblob":
+				fmt.Printf("ok  %d files  %s\n", len(res.Tables), res.Took.Round(time.Millisecond))
+			default:
 				fmt.Printf("ok  %d tables  %s\n", len(res.Tables), res.Took.Round(time.Millisecond))
 			}
 			return nil
@@ -71,10 +75,10 @@ func connsCmd() *cobra.Command {
 
 	test.Flags().DurationVar(&timeout, "timeout", 2*time.Minute, "give up after")
 
-	var schema string
+	var schema, match string
 	discover := &cobra.Command{
 		Use:   "discover NAME",
-		Short: "List the tables of a database connection",
+		Short: "List the tables of a database connection, or the files of a container",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			conns, err := loadConns()
@@ -89,17 +93,28 @@ func connsCmd() *cobra.Command {
 			if c.Type == "api" {
 				return fmt.Errorf("conn %s: an API connection has no tables", c.Name)
 			}
+			if match != "" && c.Type != "azblob" {
+				return fmt.Errorf("conn %s: --match is for azblob connections", c.Name)
+			}
+			if match != "" {
+				if _, err := blob.Patterns(match); err != nil {
+					return fmt.Errorf("--match %q: %w", match, err)
+				}
+			}
 			res, err := probe.Conn(cmd.Context(), c, schema)
 			if err != nil {
 				return err
 			}
 			for _, t := range res.Tables {
-				fmt.Println(t)
+				if match == "" || blob.Match(match, t) {
+					fmt.Println(t)
+				}
 			}
 			return nil
 		},
 	}
 	discover.Flags().StringVar(&schema, "schema", "", "schema (default: the connection's schema)")
+	discover.Flags().StringVar(&match, "match", "", "azblob: files matching a stream path, as in 'reports/file[123].csv'")
 
 	cmd.AddCommand(list, test, discover)
 	return cmd

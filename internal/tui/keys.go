@@ -1,56 +1,43 @@
 package tui
 
-import "github.com/charmbracelet/bubbles/key"
+import (
+	"strings"
 
-// One grammar in every view: E edit, e on/off, d delete (y/n), ctrl+s save, esc back,
-// enter open or next. Backspace only goes back.
-type keyMap struct {
-	Up, Down, Top, Bottom key.Binding
-	PageUp, PageDown      key.Binding
-	Enter, Back           key.Binding
-	Run, RunStream        key.Binding
-	RunDetached           key.Binding
-	RunStreamDetached     key.Binding
-	Toggle                key.Binding
-	History, Conns        key.Binding
-	Test                  key.Binding
-	Filter, Refresh       key.Binding
-	New, Edit, Delete     key.Binding
-	Duplicate             key.Binding
-	Add, Preview          key.Binding
-	Cancel, Create        key.Binding
-	Commit                key.Binding
-	Help, Quit            key.Binding
+	tea "charm.land/bubbletea/v2"
+)
+
+// pasted is pasted text routed like a key. Its name matches no binding.
+type pasted string
+
+func (p pasted) String() string { return "[" + string(p) + "]" }
+func (p pasted) Key() tea.Key   { return tea.Key{Code: tea.KeyExtended, Text: string(p)} }
+
+// teaMsg is msg as the bubbles components take it.
+func teaMsg(msg tea.KeyMsg) tea.Msg {
+	if p, ok := msg.(pasted); ok {
+		return tea.PasteMsg{Content: string(p)}
+	}
+	return msg
 }
 
-var keys = keyMap{
-	Up:                key.NewBinding(key.WithKeys("up", "k")),
-	Down:              key.NewBinding(key.WithKeys("down", "j")),
-	Top:               key.NewBinding(key.WithKeys("g", "home")),
-	Bottom:            key.NewBinding(key.WithKeys("G", "end")),
-	PageUp:            key.NewBinding(key.WithKeys("pgup")),
-	PageDown:          key.NewBinding(key.WithKeys("pgdown")),
-	Enter:             key.NewBinding(key.WithKeys("enter", "l", "right")),
-	Back:              key.NewBinding(key.WithKeys("esc", "backspace", "h", "left")),
-	Run:               key.NewBinding(key.WithKeys("r")),
-	RunStream:         key.NewBinding(key.WithKeys("s")),
-	RunDetached:       key.NewBinding(key.WithKeys("ctrl+r")),
-	RunStreamDetached: key.NewBinding(key.WithKeys("S")),
-	Toggle:            key.NewBinding(key.WithKeys("e")),
-	History:           key.NewBinding(key.WithKeys("H")),
-	Conns:             key.NewBinding(key.WithKeys("c")),
-	Test:              key.NewBinding(key.WithKeys("t")),
-	Filter:            key.NewBinding(key.WithKeys("/")),
-	Refresh:           key.NewBinding(key.WithKeys("R")),
-	New:               key.NewBinding(key.WithKeys("n")),
-	Edit:              key.NewBinding(key.WithKeys("E")),
-	Duplicate:         key.NewBinding(key.WithKeys("D")),
-	Delete:            key.NewBinding(key.WithKeys("d")),
-	Add:               key.NewBinding(key.WithKeys("a")),
-	Preview:           key.NewBinding(key.WithKeys("p")),
-	Cancel:            key.NewBinding(key.WithKeys("x")),
-	Commit:            key.NewBinding(key.WithKeys("C")),
-	Create:            key.NewBinding(key.WithKeys("c")),
-	Help:              key.NewBinding(key.WithKeys("?", "f1")),
-	Quit:              key.NewBinding(key.WithKeys("q", "ctrl+c")),
+// dropControls removes control characters; pasted text keeps line breaks and tabs.
+func dropControls(s string, paste bool) string {
+	return strings.Map(func(r rune) rune {
+		if paste && (r == '\n' || r == '\r' || r == '\t') {
+			return r
+		}
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// typedRunes is the text of a key that types something other than a space.
+func typedRunes(msg tea.KeyMsg) string {
+	k := msg.Key()
+	if k.Mod.Contains(tea.ModAlt) || k.Mod.Contains(tea.ModCtrl) || strings.TrimSpace(k.Text) == "" {
+		return ""
+	}
+	return k.Text
 }

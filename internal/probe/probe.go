@@ -1,5 +1,5 @@
 // Package probe checks that a connection answers: a database opens and lists its tables,
-// an API's base_url answers HTTP.
+// an API's base_url answers HTTP, a container lists its files.
 package probe
 
 import (
@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"tummy/internal/api"
+	"tummy/internal/blob"
 	"tummy/internal/config"
 	"tummy/internal/db"
 )
 
 type Result struct {
-	Tables []string // schema.table or table; databases only
+	Tables []string // schema.table or table; azblob: file names
 	Status int      // HTTP status; APIs only
 	Took   time.Duration
 }
@@ -46,6 +47,21 @@ func Conn(ctx context.Context, c *config.Conn, schema string) (Result, error) {
 			return Result{}, fmt.Errorf("conn %s: %w", x.Name, err)
 		}
 		return Result{Status: status, Took: time.Since(start)}, nil
+	}
+	if x.Type == "azblob" {
+		cl, err := blob.New(x)
+		if err != nil {
+			return Result{}, err
+		}
+		list, err := cl.List(ctx, "")
+		if err != nil {
+			return Result{}, err
+		}
+		res := Result{Took: time.Since(start)}
+		for _, b := range list {
+			res.Tables = append(res.Tables, b.Name)
+		}
+		return res, nil
 	}
 	d, err := db.Open(ctx, x.DB())
 	if err != nil {

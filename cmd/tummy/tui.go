@@ -33,9 +33,14 @@ func runTUI(cmd *cobra.Command, _ []string) error {
 			f.Close()
 		}
 	}
-	opts := tui.Options{Home: flagHome, Connections: flagConnections, State: st}
+	opts := tui.Options{Home: flagHome, Connections: flagConnections, State: st, Settings: tui.SettingsPath()}
 	if exe, err := os.Executable(); err == nil {
 		opts.RunCommand = []string{exe, "--home", flagHome, "--connections", flagConnections, "--state", flagState, "--quiet", "run"}
+		opts.ServeCommand = []string{exe, "--home", flagHome, "--state", flagState}
+		if flagConnections != "" {
+			opts.ServeCommand = append(opts.ServeCommand, "--connections", flagConnections)
+		}
+		opts.ServeCommand = append(opts.ServeCommand, "serve")
 	}
 	return tui.Run(opts)
 }

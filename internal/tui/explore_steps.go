@@ -7,10 +7,11 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/db"
 	"tummy/internal/steps"
@@ -219,7 +220,7 @@ func (e *explorer) openPalette(stepsOnly bool) tea.Cmd {
 	}
 	e.palette.single = true
 	e.palette.typing = true
-	e.palette.filter.Width = 40
+	e.palette.filter.SetWidth(40)
 	e.page = pagePalette
 	return e.palette.filter.Focus()
 }
@@ -261,7 +262,7 @@ func (e *explorer) runCommand(cmd string) (wizResult, tea.Cmd) {
 	return wizContinue, nil
 }
 
-func keyRune(r rune) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}} }
+func keyRune(r rune) tea.KeyMsg { return tea.KeyPressMsg{Code: r, Text: string(r)} }
 
 // example shows an op's arguments with the preview's own columns and values.
 func (e *explorer) example(op string) string {

@@ -1,6 +1,6 @@
 # tummy
 
-tummy copies tables between Postgres, MySQL, SQL Server and SQLite, and loads data from REST APIs into them.
+tummy copies tables between Postgres, MySQL, SQL Server and SQLite, and loads data from REST APIs and from CSV and xlsx files in Azure Blob Storage into them.
 
 Connections and replications are TOML files. `tummy serve` runs replications on a schedule; `tummy` on its own opens a terminal UI.
 
@@ -68,6 +68,32 @@ skip_on = [404]
 
 `for_each` runs the stream once per record of the parent stream. `skip_existing` names a column of the stream's target table: parents whose value is already loaded are skipped, so a parent without a child row is tried on every run; the parent stream is then read in full, not from its watermark. `for_each_since` is `field, value`: parents below it are skipped, with `Nd` meaning N days ago.
 
+```toml
+# connections.toml
+[conn.TRANSFER]
+type = "azblob"
+url = "https://ACCOUNT.blob.core.windows.net/transfer"
+auth = "managed_identity"   # or azcli, or sas with token = "${TRANSFER_SAS}"
+```
+
+```toml
+# replications/drops.toml
+source = "TRANSFER"
+target = "LOCAL"
+
+[streams.reports]
+path = "reports/file[123].csv"
+
+[streams.budget]
+path = "finance/budget_*.xlsx"
+sheet = "Data"
+mode = "incremental"
+update_key = "_modified"
+primary_key = ["_file", "_row"]
+```
+
+An azblob connection is one container. `auth`: `managed_identity` (default, the machine's Azure identity), `azcli` (`az login`), `sas` (token needs Read and List). A stream's `path` is a pattern over the file names: `*` and `?` stop at `/`, `[123]`, `{a,b}`, `\` before a literal. Matching files load into one table, in name order: the first row of each is its header, headers merge by name ignoring case, every value is text, an empty cell is null, blank rows are skipped. Each row gets `_file`, `_row` and `_modified` (the file's last-modified time). `sheet`: an xlsx sheet, default the first. Files that are not `.csv` or `.xlsx` are skipped with a warning. With `update_key = "_modified"` an incremental run downloads only files changed since the last run. `tummy conns discover NAME --match PATTERN` lists the files a path matches; in the UI, `/` on a container takes a pattern and `p` previews every match.
+
 `tummy check NAME` validates a replication.
 
 Previews never change a stream. Enter on a loaded stream shows its target data, `p` its source data; steps there are for looking and bookmarking. A stream is edited with `E`; in that wizard's preview ctrl+s saves the stream, everywhere else ctrl+s saves a bookmark.
@@ -96,6 +122,22 @@ tummy status           daemon health, failed runs
 tummy serve            run replications on their schedules
 tummy conns test NAME  check a connection works
 ```
+
+## Terminal UI
+
+`?` or F1: keys of the screen. ctrl+p: commands. ctrl+,: settings.
+
+Settings are in `config.toml` in the user config directory (`~/.config/tummy/config.toml`):
+
+```toml
+theme = "tummy"
+
+[keys]
+"ctrl+t" = "view.history"
+"H" = ""
+```
+
+`theme`: `tummy`, built-in themes, or a Helix-format file in `~/.config/tummy/themes/` or Helix's themes directory; on a light terminal `<theme>-light` when there is one. `[keys]`: key = command, `""` frees the key; the file's header lists the commands.
 
 ## Running on a schedule
 

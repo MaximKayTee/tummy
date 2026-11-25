@@ -226,6 +226,9 @@ func validateStream(name string, s *Stream, raw bool) error {
 			return fail("object %q needs {stream_table} or {stream_name}", s.Object)
 		}
 	}
+	if s.Sheet != "" && s.Path == "" {
+		return fail("sheet needs path")
+	}
 	if s.Mode == "backfill" && (s.UpdateKey == "" || s.Range == "") {
 		return fail(`mode = "backfill" needs update_key and range`)
 	}

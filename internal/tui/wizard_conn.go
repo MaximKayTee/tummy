@@ -14,14 +14,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/api"
 	"tummy/internal/config"
 	"tummy/internal/db"
+	"tummy/internal/engine"
 	"tummy/internal/probe"
 )
 
@@ -73,8 +75,8 @@ func wrapRes(fn func() (wizResult, tea.Cmd)) (wizResult, tea.Cmd, bool) {
 // nameRe is the name rule of config.ValidName, for callers that match a pattern.
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// connTypes are the database dialects and api.
-func connTypes() []string { return append(db.Dialects(), "api") }
+// connTypes are the database dialects, api and azblob.
+func connTypes() []string { return append(db.Dialects(), "api", "azblob") }
 
 type connProbeMsg struct {
 	Name      string
@@ -180,7 +182,7 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 		w.base = *cur
 	}
 	c := w.base
-	isDB := func(f *form) bool { t := f.get("type"); return t != "api" && t != "sqlite" }
+	isDB := func(f *form) bool { t := f.get("type"); return engine.IsDatabase(t) && t != "sqlite" }
 	// An existing url that is not scheme://… (a key=value DSN, or one env reference) is edited as written.
 	parts, parsed := config.ParseURL(c.URL)
 	if c.Type == "api" {
@@ -196,6 +198,11 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 	rawURL := func(f *form) bool { return isDB(f) && raw }
 	fields := func(f *form) bool { return isDB(f) && !raw }
 	isAPI := func(f *form) bool { return f.get("type") == "api" }
+	isBlob := func(f *form) bool { return f.get("type") == "azblob" }
+	blobURL, blobAuth, blobToken := "", "", ""
+	if c.Type == "azblob" {
+		blobURL, blobAuth, blobToken = c.URL, c.Auth, c.Token
+	}
 	authIs := func(vals ...string) func(*form) bool {
 		return func(f *form) bool { return isAPI(f) && slices.Contains(vals, f.get("auth")) }
 	}
@@ -243,7 +250,22 @@ func newConnWizard(opts Options, editing string) (*connWizard, error) {
 		}),
 		combo("schema", "Schema", "for unqualified table names; ctrl+g lists them", "").empty("default").eg("public   dbo").def(c.Schema).when(isDB),
 		text("path", "Path", "relative to "+dir).eg("shop.db").def(c.Path).when(func(f *form) bool { return f.get("type") == "sqlite" }).required(),
-		toggle("read_only", "Read only", "never a target", c.ReadOnly).when(func(f *form) bool { return !isAPI(f) }),
+		toggle("read_only", "Read only", "never a target", c.ReadOnly).when(func(f *form) bool { return engine.IsDatabase(f.get("type")) }),
+		text("container", "Container", "${VAR}: environment").eg("https://ACCOUNT.blob.core.windows.net/CONTAINER").def(blobURL).when(isBlob).required().check(func(v string) error {
+			if strings.Contains(v, "${") {
+				return nil
+			}
+			_, err := config.ContainerURL(v)
+			return err
+		}),
+		choice("blob_auth", "Auth", "", config.BlobAuthModes...).notes(map[string]string{
+			config.BlobManagedIdentity: "this machine's Azure identity",
+			config.BlobAzCLI:           "az login on this machine",
+			config.BlobSAS:             "shared access signature",
+		}).def(cmp.Or(blobAuth, config.BlobManagedIdentity)).when(isBlob),
+		secret("token_sas", "SAS", "${VAR}: environment; needs Read and List").eg("${TRANSFER_SAS}").def(blobToken).when(func(f *form) bool {
+			return isBlob(f) && f.get("blob_auth") == config.BlobSAS
+		}).required(),
 		text("base_url", "Base URL", "stream paths are appended").eg("https://api.example.com/v1").def(c.BaseURL).when(isAPI).required(),
 		choice("auth", "Auth", "", "", "bearer", "basic", "header", "query").empty("none").def(c.Auth).when(isAPI),
 		secret("token", "Token", "${VAR}: environment").eg("${API_TOKEN}").def(c.Token).when(authIs("bearer")).required(),
@@ -338,10 +360,15 @@ func (w *connWizard) conn() *config.Conn {
 	c.Dir = filepath.Dir(w.opts.Connections)
 	c.URL, c.Schema, c.Path, c.BaseURL, c.Auth = "", "", "", "", ""
 	c.Token, c.Header, c.Param, c.User, c.Password, c.RateLimit, c.RetryOn = "", "", "", "", "", "", nil
-	c.ReadOnly = c.Type != "api" && f.on("read_only")
+	c.ReadOnly = engine.IsDatabase(c.Type) && f.on("read_only")
 	switch c.Type {
 	case "sqlite":
 		c.Path = f.get("path")
+	case "azblob":
+		c.URL, c.Auth = f.get("container"), f.get("blob_auth")
+		if c.Auth == config.BlobSAS {
+			c.Token = f.get("token_sas")
+		}
 	case "api":
 		c.BaseURL, c.Auth = f.get("base_url"), f.get("auth")
 		switch c.Auth {
@@ -433,7 +460,7 @@ func (w *connWizard) update(msg tea.Msg) (wizResult, tea.Cmd) {
 				w.scroll++
 			case "up", "k":
 				w.scroll = max(w.scroll-1, 0)
-			case "pgdown", " ":
+			case "pgdown", "space":
 				w.scroll += w.pageSize
 			case "pgup":
 				w.scroll = max(w.scroll-w.pageSize, 0)
@@ -485,7 +512,7 @@ func (w *connWizard) startProbe() tea.Cmd {
 	w.connected = 0
 	w.scroll = 0
 	c, seq := w.conn(), w.probeSeq
-	if c.Type == "api" || c.Type == "sqlite" {
+	if !engine.IsDatabase(c.Type) || c.Type == "sqlite" {
 		return func() tea.Msg { return probeConn(c, seq) }
 	}
 	return func() tea.Msg { return openConn(c, seq) }
@@ -501,7 +528,7 @@ const (
 // probeNow is a whole test in one step: the connect and listing steps of the editor's
 // test, with their budgets. The connections view runs it.
 func probeNow(c *config.Conn) connProbeMsg {
-	if c.Type == "api" || c.Type == "sqlite" {
+	if !engine.IsDatabase(c.Type) || c.Type == "sqlite" {
 		return probeConn(c, 0)
 	}
 	open := openConn(c, 0).(connOpenMsg)
@@ -511,7 +538,8 @@ func probeNow(c *config.Conn) connProbeMsg {
 	return listTablesCmd(open)().(connProbeMsg)
 }
 
-// probeConn reaches an API or opens a sqlite file and lists its tables, in one step.
+// probeConn reaches an API, lists a container's files, or opens a sqlite file and lists
+// its tables, in one step.
 func probeConn(c *config.Conn, seq int) connProbeMsg {
 	ctx, cancel := context.WithTimeout(context.Background(), connectBudget)
 	defer cancel()
@@ -560,7 +588,7 @@ func listTablesCmd(open connOpenMsg) tea.Cmd {
 		}
 		tables, err := open.DB.ListAllTables(ctx)
 		if err != nil {
-			msg.Err = fmt.Errorf("conn %s: list tables after %s, connected in %s: %w", open.Name, txt.Dur(time.Since(start)), txt.Dur(open.Took), err)
+			msg.Err = fmt.Errorf("conn %s: list tables after %s, connected in %s: %w", open.Name, txt.Rounded(time.Since(start)), txt.Rounded(open.Took), err)
 			return msg
 		}
 		for _, t := range tables {
@@ -676,20 +704,24 @@ func (w *connWizard) view(width, height int) []string {
 	out := []string{" " + sTitle.Render(txt.Clean(c.Name)) + "  " + sDim.Render(txt.Clean(c.Type+"  "+c.Target())), ""}
 	switch {
 	case w.probing && w.connected > 0:
-		out = append(out, "  "+sOK.Render(glyphOK+" connected")+sDim.Render("  "+txt.Dur(w.connected))+"   "+sWarn.Render("◐ listing tables"))
+		out = append(out, "  "+sOK.Render(glyphOK+" connected")+sDim.Render("  "+txt.Rounded(w.connected))+"   "+sWarn.Render("◐ listing tables"))
 	case w.probing:
 		out = append(out, "  "+sWarn.Render("◐ connecting"))
 	case w.probe != nil && w.probe.Err != nil:
-		out = append(out, strings.Split(sErrBox.Width(max(width-4, 20)).Render(txt.CleanText(w.probe.Err.Error())), "\n")...)
+		out = append(out, strings.Split(boxed(sErrBox, max(width-4, 20), txt.CleanText(w.probe.Err.Error())), "\n")...)
 	case w.probe != nil:
-		out = append(out, "  "+sOK.Render(glyphOK+" connected")+sDim.Render("  "+txt.Dur(w.probe.Took)))
+		out = append(out, "  "+sOK.Render(glyphOK+" connected")+sDim.Render("  "+txt.Rounded(w.probe.Took)))
 		if len(w.probe.Databases) > 0 {
-			out = append(out, "", "  "+sHeader.Render(plural(len(w.probe.Databases), "database")))
+			out = append(out, "", "  "+sHeader.Render(txt.Plural(int64(len(w.probe.Databases)), "database")))
 			for _, d := range w.probe.Databases {
 				out = append(out, "    "+txt.Clean(d))
 			}
 		} else if c.Type != "api" {
-			out = append(out, "", "  "+sHeader.Render(plural(len(w.probe.Tables), "table")))
+			noun := "table"
+			if c.Type == "azblob" {
+				noun = "file"
+			}
+			out = append(out, "", "  "+sHeader.Render(txt.Plural(int64(len(w.probe.Tables)), noun)))
 			if counts := schemaCounts(w.probe.Tables); len(counts) > 1 {
 				for _, line := range wrapWords(counts, "   ", max(width-4, 20)) {
 					out = append(out, "  "+sDim.Render(txt.Clean(line)))
@@ -710,7 +742,7 @@ func (w *connWizard) view(width, height int) []string {
 	}
 	if w.saveErr != "" {
 		out = append(out, "")
-		out = append(out, strings.Split(sErrBox.Width(max(width-4, 20)).Render(txt.CleanText(w.saveErr)), "\n")...)
+		out = append(out, strings.Split(boxed(sErrBox, max(width-4, 20), txt.CleanText(w.saveErr)), "\n")...)
 	}
 	return out
 }

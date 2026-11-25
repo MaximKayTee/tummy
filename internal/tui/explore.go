@@ -7,12 +7,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"tummy/internal/txt"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 	"tummy/internal/db"
@@ -54,6 +56,7 @@ type explorer struct {
 	conns *config.Connections
 	conn  *config.Conn
 	isAPI bool
+	files bool       // azblob: the list holds files, a preview reads them
 	dl    db.Dialect // database sources
 	h     *dbHandle  // database sources
 
@@ -241,10 +244,10 @@ func newExplorer(opts Options, connName string) (*explorer, error) {
 	if err != nil {
 		return nil, err
 	}
-	ti := textinput.New()
+	ti := plainInput(true)
 	ti.Prompt = "/"
 	ti.Placeholder = "filter"
-	e := &explorer{opts: opts, conns: conns, conn: c, isAPI: c.Type == "api", filter: ti, sqlInput: newSQLArea(),
+	e := &explorer{opts: opts, conns: conns, conn: c, isAPI: c.Type == "api", files: c.Type == "azblob", filter: ti, sqlInput: newSQLArea(),
 		ticked: map[string]bool{}, widths: map[string]int{}, stepEdit: -1, stepWait: -1, fresh: true, total: -1}
 	if err := e.loadMarks(); err != nil {
 		return nil, err
@@ -252,6 +255,11 @@ func newExplorer(opts Options, connName string) (*explorer, error) {
 	if e.isAPI {
 		e.page = pageEndpoint
 		e.endpoint = e.endpointForm(config.Stream{})
+		return e, nil
+	}
+	if e.files {
+		e.filter.Placeholder = "filter, or a pattern: reports/file[123].csv"
+		e.page = pageTables
 		return e, nil
 	}
 	if e.dl, err = db.DialectFor(c.Type); err != nil {
@@ -264,6 +272,18 @@ func newExplorer(opts Options, connName string) (*explorer, error) {
 
 func newSQLArea() textarea.Model {
 	ta := textarea.New()
+	st := textarea.DefaultStyles(darkBG)
+	st.Cursor.Color = lipgloss.NoColor{}
+	ta.SetStyles(st)
+	km := &ta.KeyMap
+	km.WordForward.SetKeys("alt+right", "alt+f")
+	km.WordBackward.SetKeys("alt+left", "alt+b")
+	km.DeleteWordBackward.SetKeys("alt+backspace", "ctrl+w")
+	km.DeleteWordForward.SetKeys("alt+delete", "alt+d")
+	for _, b := range []*key.Binding{&km.PageUp, &km.PageDown, &km.SelectCharacterForward, &km.SelectCharacterBackward,
+		&km.SelectWordForward, &km.SelectWordBackward, &km.SelectLineUp, &km.SelectLineDown, &km.SelectAll, &km.CopySelection} {
+		b.SetEnabled(false)
+	}
 	ta.ShowLineNumbers = false
 	ta.Prompt = "  "
 	ta.Placeholder = "select …"
@@ -373,6 +393,9 @@ func (e *explorer) footer() (string, string) {
 			return helpLine("type", "filter", "enter", "done"), helpLine("esc", "done")
 		}
 		pairs = []string{"enter", "preview", "s", "sizes", "c", "count", "o", "sort: " + e.sortBy.String(), "S", "sql", "/", "filter", "pgup/pgdn", "page", "R", "refresh"}
+		if e.files {
+			pairs = []string{"enter", "preview", "/", "filter", "p", "preview matches", "pgup/pgdn", "page", "R", "refresh"}
+		}
 	case pageEndpoint:
 		pairs = append(e.endpoint.hints(), "ctrl+s", "fetch")
 	case pagePreview:
@@ -493,10 +516,16 @@ func (e *explorer) typing() bool {
 	return false
 }
 
-// keyHelp is the explorer section of the help window for the page on screen.
+// keyHelp is the explorer section of the keys screen for the page on screen.
 func (e *explorer) keyHelp() (string, [][2]string) {
 	switch e.page {
 	case pageTables:
+		if e.files {
+			return "files", [][2]string{
+				{"enter", "preview the file"}, {"/", "filter: text, or a pattern with * ? [123] {a,b}; * stops at /"},
+				{"p", "preview every file the pattern matches; + there adds it as a stream"}, {"R", "refresh the file list"}, {"esc", "back"},
+			}
+		}
 		return "tables", [][2]string{
 			{"enter", "preview"}, {"s", "row counts and sizes of every table from the catalog, kept as history"},
 			{"c", "exact COUNT(*) of the table"}, {"o", "sort by name, rows, size"},
@@ -766,7 +795,7 @@ func (e *explorer) view(width, height int) []string {
 // errBox shows an error in full, wrapped in a box, at most height lines.
 func errBox(msg string, width, height int) []string {
 	w := max(width-4, 16)
-	box := sErrBox.Width(w).Render(glyphErr + " " + strings.TrimSpace(txt.CleanText(msg)))
+	box := boxed(sErrBox, w, glyphErr+" "+strings.TrimSpace(txt.CleanText(msg)))
 	lines := strings.Split(box, "\n")
 	if height > 2 && len(lines) > height {
 		lines = append(lines[:height-1], lines[len(lines)-1])

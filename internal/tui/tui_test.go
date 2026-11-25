@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/exp/teatest"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/exp/teatest/v2"
 	_ "modernc.org/sqlite"
 
 	"tummy/internal/config"
@@ -60,11 +60,11 @@ func press(m Model, keys ...string) Model {
 		var msg tea.KeyMsg
 		switch k {
 		case "enter":
-			msg = tea.KeyMsg{Type: tea.KeyEnter}
+			msg = tea.KeyPressMsg{Code: tea.KeyEnter}
 		case "esc":
-			msg = tea.KeyMsg{Type: tea.KeyEsc}
+			msg = tea.KeyPressMsg{Code: tea.KeyEscape}
 		default:
-			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
+			msg = keyRunes(k)
 		}
 		mm, _ := m.Update(msg)
 		m = mm.(Model)
@@ -74,7 +74,7 @@ func press(m Model, keys ...string) Model {
 
 func TestListRendersEveryFile(t *testing.T) {
 	m := loaded(t, testHome(t))
-	v := m.View()
+	v := plainScreen(m)
 	for _, want := range []string{"REPLICATION", "alpha", "beta (off)", "gamma", "SRC", "TGT", "*/5 * * * *", "no daemon", "✗ stream x: unknow"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("list view missing %q:\n%s", want, v)
@@ -94,7 +94,7 @@ func TestNavigationAndViews(t *testing.T) {
 	if m.view != viewDetail || m.repName != "beta" {
 		t.Fatalf("detail: view=%d rep=%s", m.view, m.repName)
 	}
-	v := m.View()
+	v := plainScreen(m)
 	if !strings.Contains(v, "public.x") || !strings.Contains(v, "disabled") || !strings.Contains(v, "›  beta") {
 		t.Errorf("detail view:\n%s", v)
 	}
@@ -104,7 +104,7 @@ func TestNavigationAndViews(t *testing.T) {
 	}
 	// broken file shows its error box
 	m = press(m, "j", "enter")
-	if v := m.View(); !strings.Contains(v, "unknown mode") || strings.Contains(v, "STREAM ") {
+	if v := plainScreen(m); !strings.Contains(v, "unknown mode") || strings.Contains(v, "STREAM ") {
 		t.Errorf("broken detail:\n%s", v)
 	}
 	m = press(m, "q")
@@ -112,19 +112,19 @@ func TestNavigationAndViews(t *testing.T) {
 		t.Fatal("q should go back, not quit, from a sub view")
 	}
 	m = press(m, "c")
-	if v := m.View(); m.view != viewConns || !strings.Contains(v, "PG") || !strings.Contains(v, "u:***@") {
+	if v := plainScreen(m); m.view != viewConns || !strings.Contains(v, "PG") || !strings.Contains(v, "u:***@") {
 		t.Errorf("connections:\n%s", v)
 	}
 	m = press(m, "esc", "H")
-	if v := m.View(); m.view != viewHistory || m.repName != "" {
+	if v := plainScreen(m); m.view != viewHistory || m.repName != "" {
 		t.Errorf("global history: %d %q\n%s", m.view, m.repName, v)
 	}
 	m = press(m, "esc", "?")
-	if v := m.View(); m.help == nil || !strings.Contains(v, "replications") || !strings.Contains(v, "schedule") || !strings.Contains(v, "esc close") {
+	if v := plainScreen(m); !helpOpen(m) || !strings.Contains(v, "Replications") || !strings.Contains(v, "esc Close") {
 		t.Errorf("help:\n%s", v)
 	}
 	m = press(m, "esc")
-	if m.help != nil {
+	if helpOpen(m) {
 		t.Fatal("esc closes help")
 	}
 	m = press(m, "G")
@@ -140,8 +140,8 @@ func TestNavigationAndViews(t *testing.T) {
 func TestFilter(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "/", "bet")
-	if !m.filtering || !strings.Contains(m.View(), "/bet") {
-		t.Fatalf("typing filter:\n%s", m.View())
+	if !m.filtering || !strings.Contains(plainScreen(m), "/bet") {
+		t.Fatalf("typing filter:\n%s", plainScreen(m))
 	}
 	if reps := m.visibleReps(); len(reps) != 1 || reps[0].Name != "beta" {
 		t.Fatalf("filtered: %+v", reps)
@@ -170,7 +170,7 @@ func TestToggleEnabledEditsFile(t *testing.T) {
 		t.Fatalf("file not updated: %v", err)
 	}
 	m = loaded(t, opts)
-	if strings.Contains(m.View(), "beta (off)") {
+	if strings.Contains(plainScreen(m), "beta (off)") {
 		t.Fatal("list should show beta enabled after refresh")
 	}
 }
@@ -198,12 +198,12 @@ func TestRunInProcessAndHistory(t *testing.T) {
 		t.Fatalf("run: %+v", done)
 	}
 	m = loaded(t, opts)
-	v := m.View()
+	v := plainScreen(m)
 	if !strings.Contains(v, "✓ ok") || !strings.Contains(v, "6 rows") {
 		t.Errorf("list after run:\n%s", v)
 	}
 	m = press(m, "enter")
-	v = m.View()
+	v = plainScreen(m)
 	if !strings.Contains(v, "things_copy") || !strings.Contains(v, "full-refresh") {
 		t.Errorf("detail after run:\n%s", v)
 	}
@@ -211,12 +211,12 @@ func TestRunInProcessAndHistory(t *testing.T) {
 	m = press(m, "H")
 	mm, _ := m.Update(m.loadRuns("alpha", "things")())
 	m = mm.(Model)
-	v = m.View()
+	v = plainScreen(m)
 	if m.view != viewHistory || !strings.Contains(v, "manual") || !strings.Contains(v, "✓ ok") {
 		t.Errorf("history:\n%s", v)
 	}
 	m = press(m, "enter")
-	v = m.View()
+	v = plainScreen(m)
 	if m.view != viewRun || !strings.Contains(v, "run #") || !strings.Contains(v, "status        ok") {
 		t.Errorf("run detail:\n%s", v)
 	}
@@ -232,18 +232,18 @@ func TestRunInProcessAndHistory(t *testing.T) {
 		}
 	}
 	m = loaded(t, opts)
-	if v := m.View(); !strings.Contains(v, "✗ failed") {
+	if v := plainScreen(m); !strings.Contains(v, "✗ failed") {
 		t.Errorf("list after failure:\n%s", v)
 	}
 	m = press(m, "j", "enter")
-	if v := m.View(); !strings.Contains(v, "(replication)") || !strings.Contains(v, "✗") {
+	if v := plainScreen(m); !strings.Contains(v, "(replication)") || !strings.Contains(v, "✗") {
 		t.Errorf("detail after failure:\n%s", v)
 	}
 	m = press(m, "H")
 	mm, _ = m.Update(m.loadRuns("beta", "*")())
 	m = mm.(Model)
 	m = press(m, "enter")
-	if v := m.View(); !strings.Contains(v, "connection refused") && !strings.Contains(v, "failed to connect") {
+	if v := plainScreen(m); !strings.Contains(v, "connection refused") && !strings.Contains(v, "failed to connect") {
 		t.Errorf("error detail:\n%s", v)
 	}
 }
@@ -252,8 +252,8 @@ func TestRunQueuedWhenDaemonAlive(t *testing.T) {
 	opts := testHome(t)
 	opts.State.Heartbeat(context.Background(), 1, time.Now(), opts.Home)
 	m := loaded(t, opts)
-	if !strings.Contains(m.View(), "● daemon") {
-		t.Fatalf("badge:\n%s", m.View())
+	if !strings.Contains(plainScreen(m), "● daemon") {
+		t.Fatalf("badge:\n%s", plainScreen(m))
 	}
 	rep, _ := m.rep("alpha")
 	msg := m.runNow(rep, []string{"things"}, false)()
@@ -265,8 +265,8 @@ func TestRunQueuedWhenDaemonAlive(t *testing.T) {
 		t.Fatal("request not enqueued")
 	}
 	m = loaded(t, opts)
-	if !strings.Contains(m.View(), "queued") {
-		t.Errorf("list should show queued:\n%s", m.View())
+	if !strings.Contains(plainScreen(m), "queued") {
+		t.Errorf("list should show queued:\n%s", plainScreen(m))
 	}
 }
 
@@ -281,7 +281,7 @@ func TestConnTest(t *testing.T) {
 	mm, _ := m.Update(ok)
 	mm, _ = mm.(Model).Update(bad)
 	m = press(mm.(Model), "c")
-	v := m.View()
+	v := plainScreen(m)
 	if !strings.Contains(v, "✓ ok") || !strings.Contains(v, "✗") {
 		t.Errorf("conns view:\n%s", v)
 	}
@@ -291,7 +291,7 @@ func TestNarrowAndSmall(t *testing.T) {
 	m := loaded(t, testHome(t))
 	mm, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 10})
 	m = mm.(Model)
-	v := m.View()
+	v := plainScreen(m)
 	for _, line := range strings.Split(v, "\n") {
 		if w := widthOf(line); w > 60 {
 			t.Errorf("line wider than terminal (%d): %q", w, line)
@@ -306,10 +306,10 @@ func TestTeatestFlow(t *testing.T) {
 	opts := testHome(t)
 	tm := teatest.NewTestModel(t, New(opts), teatest.WithInitialTermSize(100, 24))
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool { return bytes.Contains(b, []byte("alpha")) }, teatest.WithDuration(5*time.Second))
-	tm.Send(tea.KeyMsg{Type: tea.KeyEnter})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	teatest.WaitFor(t, tm.Output(), func(b []byte) bool { return bytes.Contains(b, []byte("things_copy")) }, teatest.WithDuration(5*time.Second))
-	tm.Send(tea.KeyMsg{Type: tea.KeyEsc})
-	tm.Send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEscape})
+	tm.Send(keyRunes("q"))
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }
 
@@ -363,10 +363,10 @@ func TestBadConnListedWithError(t *testing.T) {
 
 func TestDryRunPage(t *testing.T) {
 	m := loaded(t, testHome(t))
-	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	mm, cmd := m.Update(keyRunes("t"))
 	m = mm.(Model)
-	if m.view != viewRun || !m.planning || !strings.Contains(m.View(), "resolving") {
-		t.Fatalf("t should open the page at once, resolving shown:\n%s", m.View())
+	if m.view != viewRun || !m.planning || !strings.Contains(plainScreen(m), "resolving") {
+		t.Fatalf("t should open the page at once, resolving shown:\n%s", plainScreen(m))
 	}
 	var plan planMsg
 	found := false
@@ -380,7 +380,7 @@ func TestDryRunPage(t *testing.T) {
 	}
 	mm, _ = m.Update(plan)
 	m = mm.(Model)
-	v := m.View()
+	v := plainScreen(m)
 	if m.view != viewRun || m.planName == "" || !strings.Contains(v, "dry run") || !strings.Contains(v, "create") || !strings.Contains(v, "things") {
 		t.Fatalf("plan page:\n%s", v)
 	}
@@ -390,7 +390,7 @@ func TestDryRunPage(t *testing.T) {
 	if strings.Contains(v, "rolled back") {
 		t.Fatalf("plan page sampled before t:\n%s", v)
 	}
-	mm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	mm, cmd = m.Update(keyRunes("t"))
 	m = mm.(Model)
 	found = false
 	for _, msg := range runBatch(t, cmd) {
@@ -403,13 +403,13 @@ func TestDryRunPage(t *testing.T) {
 	}
 	mm, _ = m.Update(plan)
 	m = mm.(Model)
-	if v = m.View(); !strings.Contains(v, "rolled back") || m.planning {
+	if v = plainScreen(m); !strings.Contains(v, "rolled back") || m.planning {
 		t.Fatalf("test load page:\n%s", v)
 	}
 	if runs, _ := m.opts.State.RunsFor(context.Background(), "", "", 10); len(runs) != 0 {
 		t.Fatal("test load wrote a run")
 	}
-	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = mm.(Model)
 	if m.view != viewList || m.planName != "" {
 		t.Fatalf("esc: view %d plan %q", m.view, m.planName)
@@ -417,11 +417,11 @@ func TestDryRunPage(t *testing.T) {
 	// r on the plan page runs it and shows the detail view, where streams report progress
 	mm, _ = m.Update(plan)
 	m = mm.(Model)
-	mm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	mm, cmd = m.Update(keyRunes("t"))
 	m = mm.(Model)
 	mm, _ = m.Update(plan)
 	m = mm.(Model)
-	mm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	mm, cmd = m.Update(keyRunes("r"))
 	m = mm.(Model)
 	if m.view != viewDetail || m.repName != "alpha" || cmd == nil {
 		t.Fatalf("r from the plan: view %d rep %q", m.view, m.repName)
@@ -431,12 +431,12 @@ func TestDryRunPage(t *testing.T) {
 func TestControlRunesDropped(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "/")
-	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("al\x00pha")})
+	mm, _ := m.Update(keyRunes("al\x00pha"))
 	m = mm.(Model)
 	if got := m.filter.Value(); got != "alpha" {
 		t.Fatalf("filter %q", got)
 	}
-	mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{0}})
+	mm, _ = m.Update(keyRunes("\x00"))
 	if mm.(Model).filter.Value() != "alpha" {
 		t.Fatal("a lone NUL should do nothing")
 	}
@@ -446,7 +446,7 @@ func TestDryRunFromDetailAndBrokenRep(t *testing.T) {
 	opts := testHome(t)
 	m := loaded(t, opts)
 	m = press(m, "enter") // alpha's detail view
-	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	mm, cmd := m.Update(keyRunes("t"))
 	m = mm.(Model)
 	if m.view != viewRun || !m.planning || cmd == nil {
 		t.Fatalf("t on the detail view: view %d planning %v", m.view, m.planning)
@@ -459,7 +459,7 @@ func TestDryRunFromDetailAndBrokenRep(t *testing.T) {
 			m.cursor[viewList] = i
 		}
 	}
-	mm, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")})
+	mm, cmd = m.Update(keyRunes("t"))
 	m = mm.(Model)
 	for _, msg := range runBatch(t, cmd) {
 		if p, ok := msg.(planMsg); ok {
@@ -467,7 +467,7 @@ func TestDryRunFromDetailAndBrokenRep(t *testing.T) {
 			m = mm.(Model)
 		}
 	}
-	if m.view != viewRun || m.planning || !strings.Contains(m.View(), "NOPE") {
-		t.Fatalf("broken replication: view %d planning %v\n%s", m.view, m.planning, m.View())
+	if m.view != viewRun || m.planning || !strings.Contains(plainScreen(m), "NOPE") {
+		t.Fatalf("broken replication: view %d planning %v\n%s", m.view, m.planning, plainScreen(m))
 	}
 }

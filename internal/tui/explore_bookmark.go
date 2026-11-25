@@ -2,14 +2,13 @@ package tui
 
 import (
 	"errors"
-	"io"
-	"os"
 	"slices"
 	"strings"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/MaximKayTee/gotuitools/sys"
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 )
@@ -163,9 +162,6 @@ func (e *explorer) deleteBookmark(name string) error {
 	return nil
 }
 
-// clipboardOut receives the OSC 52 sequence that sets the terminal's clipboard.
-var clipboardOut io.Writer = os.Stdout
-
 // copySQL puts the query as shown on the clipboard through the terminal (OSC 52).
 func (e *explorer) copySQL() tea.Cmd {
 	sql := e.shownSQL()
@@ -174,8 +170,5 @@ func (e *explorer) copySQL() tea.Cmd {
 		return nil
 	}
 	e.setNote("sql copied", false)
-	return func() tea.Msg {
-		io.WriteString(clipboardOut, ansi.SetSystemClipboard(sql))
-		return nil
-	}
+	return sys.Copy(sql)
 }

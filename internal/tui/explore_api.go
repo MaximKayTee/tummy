@@ -6,12 +6,13 @@ import (
 	"regexp"
 	"slices"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"tummy/internal/txt"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/api"
 	"tummy/internal/config"

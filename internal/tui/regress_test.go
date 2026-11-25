@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"tummy/internal/config"
 	"tummy/internal/db"
@@ -21,7 +21,7 @@ import (
 func TestPasteKeepsLines(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "/")
-	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a\x00b\tc"), Paste: true})
+	mm, _ := m.Update(tea.PasteMsg{Content: "a\x00b\tc"})
 	if got := mm.(Model).filter.Value(); got != "ab c" { // the input turns the tab into a space itself
 		t.Fatalf("paste: %q", got)
 	}
@@ -33,7 +33,7 @@ func TestZeroWidthDoesNotPanic(t *testing.T) {
 	m = mm.(Model)
 	for _, v := range []view{viewList, viewDetail, viewConns} {
 		m.view = v
-		_ = m.View()
+		_ = plainScreen(m)
 	}
 }
 
@@ -42,7 +42,7 @@ func TestBrokenRepIsNotMarkedRunning(t *testing.T) {
 	for i, r := range m.snap.Reps {
 		if r.Err != "" || r.ConnErr != "" {
 			m.cursor[viewList] = i
-			mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+			mm, _ := m.Update(keyRunes("r"))
 			if mm.(Model).inflight[r.Name] {
 				t.Fatalf("%s marked running after a refused run", r.Name)
 			}
@@ -55,7 +55,7 @@ func TestBrokenRepIsNotMarkedRunning(t *testing.T) {
 func TestFilterClearedAcrossViews(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "/")
-	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha")})
+	mm, _ := m.Update(keyRunes("alpha"))
 	m = press(mm.(Model), "enter", "c")
 	if m.filter.Value() != "" || len(m.visibleConns()) == 0 {
 		t.Fatalf("filter %q carried into connections", m.filter.Value())
@@ -273,7 +273,7 @@ func TestPreviewSaveFromTableListAddsOnce(t *testing.T) {
 	for _, r := range "other" {
 		send(t, w, keyRunes(string(r)))
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyCtrlE}, keySave, keyEsc)
+	send(t, w, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl}, keySave, keyEsc)
 	if res := send(t, w, keyEnter); res != wizContinue || w.step != stepReview || w.reviewErr != "" || count(w) != 1 {
 		t.Fatalf("filtered: res %d step %d err %q, %d streams named other", res, w.step, w.reviewErr, count(w))
 	}
@@ -285,7 +285,7 @@ func TestPreviewSaveFromTableListAddsOnce(t *testing.T) {
 		}
 		send(t, w, keyDown)
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyCtrlE}, keySave, keyEsc)
+	send(t, w, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl}, keySave, keyEsc)
 	if res := send(t, w, keyEnter); res != wizContinue || w.step != stepReview || count(w) != 1 {
 		t.Fatalf("unfiltered: res %d step %d, %d streams named other", res, w.step, count(w))
 	}
@@ -301,7 +301,7 @@ func TestSecretKeepsSpaces(t *testing.T) {
 	f.set("password", "")
 	f.focused = f.field("password")
 	f.focus()
-	f.update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s3cret\r\n"), Paste: true})
+	f.update(pasted("s3cret\r\n"))
 	if got := f.get("password"); got != "s3cret" {
 		t.Fatalf("pasted password %q", got)
 	}

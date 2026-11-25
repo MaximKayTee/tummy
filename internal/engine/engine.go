@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"tummy/internal/api"
+	"tummy/internal/blob"
 	"tummy/internal/config"
 	"tummy/internal/db"
 	"tummy/internal/lock"
@@ -110,6 +111,9 @@ func (e *Engine) phase(ctx context.Context, runID int64, s stream, object, phase
 	e.emit(ev)
 }
 
+// IsDatabase reports whether a connection type is a database, not an api or azblob.
+func IsDatabase(typ string) bool { return typ != "api" && typ != "azblob" }
+
 type Result struct {
 	Stream string
 	Object string
@@ -185,6 +189,9 @@ func (e *Engine) run(ctx context.Context, r *config.Replication, only []string) 
 	if tgtConn.ReadOnly {
 		return nil, fmt.Errorf("conn %s: read_only, not a target", r.Target)
 	}
+	if !IsDatabase(tgtConn.Type) {
+		return nil, fmt.Errorf("conn %s: %s, not a target", r.Target, tgtConn.Type)
+	}
 	e.emit(Event{Phase: PhaseConnecting, Object: r.Target})
 	tp := tgtConn.DB()
 	tp.Create = true // a new sqlite target
@@ -212,6 +219,17 @@ func (e *Engine) run(ctx context.Context, r *config.Replication, only []string) 
 		arun = &apiRun{e: e, client: client, records: map[string][]api.Record{}}
 		open = func(ctx context.Context, s stream, target db.Table, exists bool, runID int64, timeout time.Duration) (*rowSource, error) {
 			return e.openAPI(ctx, arun, tgt, s, target, exists, runID, timeout)
+		}
+	} else if srcConn.Type == "azblob" {
+		cl, err := blob.New(srcConn)
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range r.Resolved {
+			streams = append(streams, plain(s))
+		}
+		open = func(ctx context.Context, s stream, target db.Table, exists bool, runID int64, timeout time.Duration) (*rowSource, error) {
+			return e.openBlob(ctx, cl, tgt, s, target, exists, runID, timeout)
 		}
 	} else {
 		e.emit(Event{Phase: PhaseConnecting, Object: r.Source})

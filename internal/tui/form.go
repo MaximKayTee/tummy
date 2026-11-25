@@ -6,13 +6,14 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"tummy/internal/txt"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/cursor"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 )
@@ -140,6 +141,7 @@ var optionNotes = map[string]string{
 	"mysql":        "MySQL, MariaDB",
 	"sqlite":       "file",
 	"api":          "HTTP JSON",
+	"azblob":       "Azure Blob Storage container: CSV, xlsx",
 	"bearer":       "Authorization: Bearer <token>",
 	"basic":        "user and password",
 	"header":       "custom header",
@@ -188,9 +190,16 @@ const dropRows = 10
 // cursorMode is the text cursor of forms and lists; tests use a static one.
 var cursorMode = cursor.CursorBlink
 
-func newInput() textinput.Model {
+func newInput() textinput.Model { return plainInput(cursorMode == cursor.CursorBlink) }
+
+// plainInput is a text input uncoloured but for a grey placeholder.
+func plainInput(blink bool) textinput.Model {
 	ti := textinput.New()
-	ti.Cursor.SetMode(cursorMode)
+	grey := lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	plain := textinput.StyleState{Placeholder: grey, Suggestion: grey}
+	ti.SetStyles(textinput.Styles{Focused: plain, Blurred: plain, Cursor: textinput.CursorStyle{Color: lipgloss.NoColor{}, Blink: blink}})
+	ti.KeyMap.DeleteWordBackward.SetKeys("alt+backspace", "ctrl+w")
+	ti.KeyMap.DeleteWordForward.SetKeys("alt+delete", "alt+d")
 	return ti
 }
 
@@ -202,7 +211,7 @@ func newForm(title string, fields ...*field) *form {
 			ti := newInput()
 			ti.Prompt = ""
 			ti.CharLimit = 4096
-			ti.Width = 60
+			ti.SetWidth(60)
 			ti.SetValue(fl.Value)
 			if fl.Kind == kindSecret {
 				ti.EchoMode = textinput.EchoPassword
@@ -486,7 +495,7 @@ func (f *form) handle(msg tea.KeyMsg) (formResult, tea.Cmd) {
 				fl.Value = opts[(index(opts, fl.Value)+step)%len(opts)]
 				fl.err = ""
 			}
-		case " ":
+		case "space":
 			return formContinue, f.openDrop(fl, "")
 		default:
 			if r := typedRunes(msg); r != "" {
@@ -496,13 +505,13 @@ func (f *form) handle(msg tea.KeyMsg) (formResult, tea.Cmd) {
 		return formContinue, f.focus() // fields may have appeared or gone
 	case kindToggle:
 		switch msg.String() {
-		case " ", "left", "right":
+		case "space", "left", "right":
 			fl.On = !fl.On
 		}
 		return formContinue, f.focus()
 	case kindMulti:
 		switch msg.String() {
-		case " ", "right":
+		case "space", "right":
 			return formContinue, f.openDrop(fl, "")
 		case "ctrl+a", "alt+a":
 			for _, o := range fl.Options {
@@ -518,22 +527,14 @@ func (f *form) handle(msg tea.KeyMsg) (formResult, tea.Cmd) {
 		}
 		return formContinue, f.focus()
 	default:
-		if fl.Kind == kindSecret && msg.Paste { // a copied secret often ends in a line break
-			msg.Runes = []rune(strings.TrimRight(string(msg.Runes), "\r\n"))
+		if p, ok := msg.(pasted); ok && fl.Kind == kindSecret { // a copied secret often ends in a line break
+			msg = pasted(strings.TrimRight(string(p), "\r\n"))
 		}
 		var cmd tea.Cmd
-		fl.input, cmd = fl.input.Update(msg)
+		fl.input, cmd = fl.input.Update(teaMsg(msg))
 		fl.err = ""
 		return formContinue, cmd
 	}
-}
-
-// typedRunes is the text of a key that types something other than a space.
-func typedRunes(msg tea.KeyMsg) string {
-	if msg.Type != tea.KeyRunes || msg.Alt || strings.TrimSpace(string(msg.Runes)) == "" {
-		return ""
-	}
-	return string(msg.Runes)
 }
 
 // next moves to the next field; on the last one it submits.
@@ -789,7 +790,7 @@ func (f *form) view(width int, height ...int) []string {
 		if focused {
 			focusStart = len(body)
 		}
-		label := pad(fl.Label, labelW, false)
+		label := txt.Fit(fl.Label, labelW)
 		if focused {
 			label = sKey.Render(label)
 		} else {
@@ -854,7 +855,7 @@ func (f *form) render(fl *field, focused bool, width int) string {
 	switch fl.Kind {
 	case kindText, kindSecret:
 		if focused && f.drop == nil {
-			fl.input.Width = max(width-1, 10)
+			fl.input.SetWidth(max(width-1, 10))
 			return fl.input.View()
 		}
 		if fl.Kind == kindSecret {

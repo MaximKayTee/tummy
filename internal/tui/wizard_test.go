@@ -9,11 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"tummy/internal/txt"
 
-	"github.com/charmbracelet/bubbles/cursor"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/cursor"
+	tea "charm.land/bubbletea/v2"
 	_ "modernc.org/sqlite"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 )
@@ -23,22 +24,31 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func keyRunes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+func keyRunes(s string) tea.KeyMsg {
+	r := []rune(s)
+	switch {
+	case s == " ":
+		return tea.KeyPressMsg{Code: tea.KeySpace, Text: s}
+	case len(r) == 1:
+		return tea.KeyPressMsg{Code: r[0], Text: s}
+	}
+	return tea.KeyPressMsg{Code: tea.KeyExtended, Text: s}
+}
 
 var (
-	keyEnter = tea.KeyMsg{Type: tea.KeyEnter}
-	keyEsc   = tea.KeyMsg{Type: tea.KeyEsc}
-	keyTab   = tea.KeyMsg{Type: tea.KeyTab}
-	keyRight = tea.KeyMsg{Type: tea.KeyRight}
-	keySave  = tea.KeyMsg{Type: tea.KeyCtrlS}
-	keyCtrlE = tea.KeyMsg{Type: tea.KeyCtrlE}
-	keySpace = tea.KeyMsg{Type: tea.KeySpace}
-	keyDown  = tea.KeyMsg{Type: tea.KeyDown}
-	keyUp    = tea.KeyMsg{Type: tea.KeyUp}
-	keyBack  = tea.KeyMsg{Type: tea.KeyBackspace}
-	keyTest  = tea.KeyMsg{Type: tea.KeyCtrlG}
-	keyAll   = tea.KeyMsg{Type: tea.KeyCtrlA}
-	keyNone  = tea.KeyMsg{Type: tea.KeyCtrlN}
+	keyEnter = tea.KeyPressMsg{Code: tea.KeyEnter}
+	keyEsc   = tea.KeyPressMsg{Code: tea.KeyEscape}
+	keyTab   = tea.KeyPressMsg{Code: tea.KeyTab}
+	keyRight = tea.KeyPressMsg{Code: tea.KeyRight}
+	keySave  = tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
+	keyCtrlE = tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl}
+	keySpace = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+	keyDown  = tea.KeyPressMsg{Code: tea.KeyDown}
+	keyUp    = tea.KeyPressMsg{Code: tea.KeyUp}
+	keyBack  = tea.KeyPressMsg{Code: tea.KeyBackspace}
+	keyTest  = tea.KeyPressMsg{Code: 'g', Mod: tea.ModCtrl}
+	keyAll   = tea.KeyPressMsg{Code: 'a', Mod: tea.ModCtrl}
+	keyNone  = tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl}
 )
 
 func typeKeys(f *form, s string) {
@@ -149,7 +159,7 @@ func TestFormBasics(t *testing.T) {
 	if res, _ := f.update(keyEsc); res != formCancel {
 		t.Fatal("esc cancels")
 	}
-	v := strings.Join(f.view(80), "\n")
+	v := strings.Join(plain(f.view(80)), "\n")
 	if !strings.Contains(v, "[b]") || !strings.Contains(v, "● on") {
 		t.Fatalf("view:\n%s", v)
 	}
@@ -173,7 +183,7 @@ func TestFocusStaysWhenFieldsAppear(t *testing.T) {
 	if f.get("mode") != "backfill" || f.focused.Key != "mode" {
 		t.Fatalf("focus moved: %s on %q", f.focused.Key, f.get("mode"))
 	}
-	f.update(tea.KeyMsg{Type: tea.KeyLeft}) // incremental: two fields appear above
+	f.update(tea.KeyPressMsg{Code: tea.KeyLeft}) // incremental: two fields appear above
 	if f.focused.Key != "mode" || f.cur != 3 {
 		t.Fatalf("focus moved: %s at %d", f.focused.Key, f.cur)
 	}
@@ -187,7 +197,7 @@ func TestFieldErrorKeepsExample(t *testing.T) {
 	f := newForm("t", text("n", "N", "sales   letters").required(), text("m", "M", ""))
 	f.update(keySave)
 	f.update(keyDown)
-	v := strings.Join(f.view(80), "\n")
+	v := strings.Join(plain(f.view(80)), "\n")
 	if !strings.Contains(v, "↳ required") || !strings.Contains(v, "sales   letters") {
 		t.Fatalf("error hides the example:\n%s", v)
 	}
@@ -207,7 +217,7 @@ func TestFormScrolls(t *testing.T) {
 	for range 25 {
 		f.update(keyDown)
 	}
-	v := f.view(80, 12)
+	v := plain(f.view(80, 12))
 	if len(v) > 12 || !strings.Contains(strings.Join(v, "\n"), "Field 25") || !strings.Contains(strings.Join(v, "\n"), "more") {
 		t.Fatalf("focused field off screen (%d lines):\n%s", len(v), strings.Join(v, "\n"))
 	}
@@ -216,7 +226,7 @@ func TestFormScrolls(t *testing.T) {
 	}
 	f.update(keyEnter) // open the list on the last field
 	f.update(keyDown)
-	v = f.view(80, 16)
+	v = plain(f.view(80, 16))
 	joined := strings.Join(v, "\n")
 	if len(v) > 16 || !strings.Contains(joined, "Pick") || !strings.Contains(joined, "› opt01") {
 		t.Fatalf("open list off screen (%d lines):\n%s", len(v), joined)
@@ -247,7 +257,7 @@ func TestPicker(t *testing.T) {
 	if res, _ := p.update(keyEnter); res != formSubmit {
 		t.Fatal("enter submits")
 	}
-	v := strings.Join(p.view(60, 10), "\n")
+	v := strings.Join(plain(p.view(60, 10)), "\n")
 	if !strings.Contains(v, "2 selected") || !strings.Contains(v, "● b.z") {
 		t.Fatalf("view:\n%s", v)
 	}
@@ -282,14 +292,14 @@ func TestMultiField(t *testing.T) {
 	if got := f.picked("k"); len(got) != 1 || got[0] != "b" {
 		t.Fatalf("preselected: %v", got)
 	}
-	if v := strings.Join(f.view(80), "\n"); !strings.Contains(v, "[b] ▾") || strings.Contains(v, "○ a") {
+	if v := strings.Join(plain(f.view(80)), "\n"); !strings.Contains(v, "[b] ▾") || strings.Contains(v, "○ a") {
 		t.Fatalf("closed shows the picks only:\n%s", v)
 	}
 	f.update(keySpace) // open
 	if f.drop == nil {
 		t.Fatal("dropdown")
 	}
-	if v := strings.Join(f.view(80), "\n"); !strings.Contains(v, "○ a") || !strings.Contains(v, "● b") {
+	if v := strings.Join(plain(f.view(80)), "\n"); !strings.Contains(v, "○ a") || !strings.Contains(v, "● b") {
 		t.Fatalf("open list:\n%s", v)
 	}
 	f.update(keyDown)
@@ -325,7 +335,7 @@ func TestMultiField(t *testing.T) {
 	f.update(keyNone)
 	f.update(keySpace)
 	typeKeys(f, "zz")
-	if v := strings.Join(f.view(80), "\n"); strings.Contains(v, "zz  new") {
+	if v := strings.Join(plain(f.view(80)), "\n"); strings.Contains(v, "zz  new") {
 		t.Fatalf("typed value offered on a fixed list:\n%s", v)
 	}
 	f.update(keyEnter)
@@ -338,7 +348,7 @@ func TestMultiTypedValueIsARow(t *testing.T) {
 	f := newForm("t", multi("k", "K", "", []string{"apple", "banana"}, nil))
 	f.update(keySpace)
 	typeKeys(f, "zz")
-	v := strings.Join(f.view(80), "\n")
+	v := strings.Join(plain(f.view(80)), "\n")
 	if !strings.Contains(v, "○ zz") || !strings.Contains(v, "new") {
 		t.Fatalf("typed row:\n%s", v)
 	}
@@ -356,12 +366,12 @@ func TestMultiDropdownFilters(t *testing.T) {
 	}
 	f := newForm("t", multi("k", "K", "", opts, nil).fixed())
 	f.update(keySpace) // open, typing straight away
-	v := strings.Join(f.view(60), "\n")
+	v := strings.Join(plain(f.view(60)), "\n")
 	if !strings.Contains(v, "1 of 139") {
 		t.Fatalf("footer:\n%s", v)
 	}
 	typeKeys(f, "12")
-	if v := strings.Join(f.view(60), "\n"); !strings.Contains(v, "1 of 12") || strings.Contains(v, "○ 2 ") { // 12 112 120…129
+	if v := strings.Join(plain(f.view(60)), "\n"); !strings.Contains(v, "1 of 12") || strings.Contains(v, "○ 2 ") { // 12 112 120…129
 		t.Fatalf("typed filter:\n%s", v)
 	}
 	f.update(keySpace) // tick 12
@@ -379,7 +389,7 @@ func TestSelectDropdown(t *testing.T) {
 		opts = append(opts, fmt.Sprintf("col_%02d", i))
 	}
 	f := newForm("t", choice("c", "C", "", opts...), text("x", "X", ""))
-	v := strings.Join(f.view(60), "\n")
+	v := strings.Join(plain(f.view(60)), "\n")
 	if !strings.Contains(v, "[col_00] ▾") || strings.Contains(v, "col_01") {
 		t.Fatalf("closed shows the value only:\n%s", v)
 	}
@@ -387,11 +397,11 @@ func TestSelectDropdown(t *testing.T) {
 	if f.drop == nil {
 		t.Fatal("enter opens the list")
 	}
-	lines := f.view(60)
+	lines := plain(f.view(60))
 	if len(lines) > dropRows+7 || !strings.Contains(strings.Join(lines, "\n"), "col_09") || strings.Contains(strings.Join(lines, "\n"), "col_12") {
 		t.Fatalf("list scrolls at %d rows:\n%s", dropRows, strings.Join(lines, "\n"))
 	}
-	f.update(tea.KeyMsg{Type: tea.KeyPgDown})
+	f.update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	if it, _ := f.drop.current(); it != "col_10" {
 		t.Fatalf("pgdown: %s", it)
 	}
@@ -420,7 +430,7 @@ func TestSelectDropdown(t *testing.T) {
 		t.Fatalf("typed value taken by a fixed choice: %q", f.get("c"))
 	}
 	g := newForm("t", combo("o", "O", "", "", "orders").empty("stream name"))
-	if v := strings.Join(g.view(60), "\n"); !strings.Contains(v, "[stream name]") {
+	if v := strings.Join(plain(g.view(60)), "\n"); !strings.Contains(v, "[stream name]") {
 		t.Fatalf("empty label:\n%s", v)
 	}
 	g.update(keyEnter)
@@ -438,7 +448,7 @@ func TestStreamFieldsRoundTrip(t *testing.T) {
 		Query: map[string]string{"a": "1", "b": "2"}, SkipOn: []int{404}, Limit: 30, ForEach: "users",
 		AddColumns: map[string]string{"uid": "{users.id}"}, Records: "data[]", Sorted: "desc",
 	}
-	f := newForm("t", streamFields(api, nil, true)...)
+	f := newForm("t", streamFields(api, nil, srcAPI)...)
 	if got := streamFromFields(f, api); !equalStream(got, api) {
 		t.Fatalf("api round trip:\n%+v\n%+v", got, api)
 	}
@@ -448,7 +458,7 @@ func TestStreamFieldsRoundTrip(t *testing.T) {
 		t.Fatalf("hidden by a change: %+v", got)
 	}
 	tbl := config.Stream{Mode: "full-refresh", Select: config.Names{"-notes"}, Where: "v <> 'none'", Limit: 5, QueryTimeout: "30s", Steps: "keep id", SQL: "select 1"}
-	f = newForm("t", streamFields(tbl, []string{"id", "v", "notes"}, false)...)
+	f = newForm("t", streamFields(tbl, []string{"id", "v", "notes"}, srcDB)...)
 	if f.field("select") != nil || f.field("sql") != nil || f.field("steps") != nil {
 		t.Fatal("sql, select and steps are shaped in explore, not on the form")
 	}
@@ -457,7 +467,7 @@ func TestStreamFieldsRoundTrip(t *testing.T) {
 	}
 	// the default stays unwritten
 	plain := config.Stream{}
-	f = newForm("t", streamFields(plain, nil, true)...)
+	f = newForm("t", streamFields(plain, nil, srcAPI)...)
 	if got := streamFromFields(f, plain); got.Method != "" || got.Mode != "" || got.SinceFormat != "" {
 		t.Fatalf("defaults written: %+v", got)
 	}
@@ -487,7 +497,7 @@ func TestConnWizardCreatesAndEdits(t *testing.T) {
 		t.Fatalf("probe: %+v", msg)
 	}
 	w.update(msg)
-	if v := strings.Join(w.view(80, 20), "\n"); !strings.Contains(v, "connected") || !strings.Contains(v, "things") {
+	if v := strings.Join(plain(w.view(80, 20)), "\n"); !strings.Contains(v, "connected") || !strings.Contains(v, "things") {
 		t.Fatalf("probe view:\n%s", v)
 	}
 	if res, _ := w.update(keySave); res != wizDone {
@@ -622,7 +632,7 @@ func TestRepWizardFlow(t *testing.T) {
 	for _, r := range "sales.*" {
 		send(t, w, keyRunes(string(r)))
 	}
-	if v := strings.Join(w.view(100, 20), "\n"); !strings.Contains(v, "sales.*") || !strings.Contains(v, "new") {
+	if v := strings.Join(plain(w.view(100, 20)), "\n"); !strings.Contains(v, "sales.*") || !strings.Contains(v, "new") {
 		t.Fatalf("typed row:\n%s", v)
 	}
 	send(t, w, keyEnter)
@@ -657,7 +667,7 @@ func TestRepWizardFlow(t *testing.T) {
 	if s := w.draft.Streams[1].Stream; s.UpdateKey != "updated_at" || s.Mode != "snapshot" {
 		t.Fatalf("override: %+v", s)
 	}
-	if v := strings.Join(w.view(100, 20), "\n"); !strings.Contains(v, "update_key=updated_at") {
+	if v := strings.Join(plain(w.view(100, 20)), "\n"); !strings.Contains(v, "update_key=updated_at") {
 		t.Fatalf("overrides column:\n%s", v)
 	}
 	// e turns a stream off; d asks; f2 goes back a step
@@ -673,7 +683,7 @@ func TestRepWizardFlow(t *testing.T) {
 	if len(w.draft.Streams) != 2 {
 		t.Fatal("n keeps the stream")
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyF2})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyF2})
 	if w.step != stepDefaults || len(w.draft.Streams) != 2 {
 		t.Fatalf("f2: step %d, %d streams", w.step, len(w.draft.Streams))
 	}
@@ -699,8 +709,8 @@ func TestRepWizardFlow(t *testing.T) {
 	}
 	w2.basics.set("name", "renamed")
 	send(t, w2, keySave)
-	if w2.step != stepReview || !strings.Contains(strings.Join(w2.view(100, 30), "\n"), "was fresh.toml") {
-		t.Fatalf("review of a rename:\n%s", strings.Join(w2.view(100, 30), "\n"))
+	if w2.step != stepReview || !strings.Contains(strings.Join(plain(w2.view(100, 30)), "\n"), "was fresh.toml") {
+		t.Fatalf("review of a rename:\n%s", strings.Join(plain(w2.view(100, 30)), "\n"))
 	}
 	if res := send(t, w2, keySave); res != wizDone {
 		t.Fatalf("resave: %q", w2.reviewErr)
@@ -751,8 +761,8 @@ query_timeout = "30s"
 	conns, _ := config.LoadConnections(opts.Connections)
 	w, _ := newRepWizard(opts, conns, "hr")
 	send(t, w, keySave)
-	if w.step != stepReview || w.changes != 0 || !strings.Contains(strings.Join(w.view(100, 30), "\n"), "no changes") {
-		t.Fatalf("untouched edit shows changes: %d\n%s", w.changes, strings.Join(w.view(100, 30), "\n"))
+	if w.step != stepReview || w.changes != 0 || !strings.Contains(strings.Join(plain(w.view(100, 30)), "\n"), "no changes") {
+		t.Fatalf("untouched edit shows changes: %d\n%s", w.changes, strings.Join(plain(w.view(100, 30)), "\n"))
 	}
 	// E on the stream in the detail view: its own values, where and limit included
 	w2, err := newEditStreamWizard(opts, conns, "hr", "things")
@@ -843,7 +853,7 @@ func TestAddFromDetailNeverRemoves(t *testing.T) {
 	if w.step != stepReview || repFile(t, opts, "alpha") != before {
 		t.Fatalf("review before writing: step %d", w.step)
 	}
-	if v := strings.Join(w.view(100, 30), "\n"); !strings.Contains(v, "+ [streams.") {
+	if v := strings.Join(plain(w.view(100, 30)), "\n"); !strings.Contains(v, "+ [streams.") {
 		t.Fatalf("diff:\n%s", v)
 	}
 	send(t, w, keyEsc) // back to the list, ticks kept
@@ -978,20 +988,20 @@ func TestNewConnectionFromSourceList(t *testing.T) {
 func TestModelOpensWizards(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "n")
-	if m.view != viewWizard || m.wiz == nil || !strings.Contains(m.View(), "New replication") {
-		t.Fatalf("n:\n%s", m.View())
+	if m.view != viewWizard || m.wiz == nil || !strings.Contains(plainScreen(m), "New replication") {
+		t.Fatalf("n:\n%s", plainScreen(m))
 	}
 	m = press(m, "esc")
 	if m.view != viewList || m.wiz != nil {
 		t.Fatal("esc leaves an untouched wizard")
 	}
 	m = press(m, "E")
-	if !strings.Contains(m.View(), "Edit replication alpha") {
-		t.Fatalf("E:\n%s", m.View())
+	if !strings.Contains(plainScreen(m), "Edit replication alpha") {
+		t.Fatalf("E:\n%s", plainScreen(m))
 	}
 	m = press(m, "x", "esc") // typed into the name: asks
-	if m.ask == nil || !strings.Contains(m.View(), "discard changes? y/n") {
-		t.Fatalf("discard prompt:\n%s", m.View())
+	if m.ask == nil || !strings.Contains(plainScreen(m), "discard changes? y/n") {
+		t.Fatalf("discard prompt:\n%s", plainScreen(m))
 	}
 	m = press(m, "n")
 	if m.wiz == nil || m.ask != nil {
@@ -1005,16 +1015,16 @@ func TestModelOpensWizards(t *testing.T) {
 		t.Fatal("y discards")
 	}
 	m = press(m, "c", "n")
-	if !strings.Contains(m.View(), "New connection") {
-		t.Fatalf("conn n:\n%s", m.View())
+	if !strings.Contains(plainScreen(m), "New connection") {
+		t.Fatalf("conn n:\n%s", plainScreen(m))
 	}
 	m = press(m, "esc", "enter")
-	if !strings.Contains(m.View(), "explore PG") {
-		t.Fatalf("explore:\n%s", m.View())
+	if !strings.Contains(plainScreen(m), "explore PG") {
+		t.Fatalf("explore:\n%s", plainScreen(m))
 	}
 	m = press(m, "esc", "d")
-	if m.ask == nil || !strings.Contains(m.View(), "delete connection PG? used by beta") {
-		t.Fatalf("delete prompt:\n%s", m.View())
+	if m.ask == nil || !strings.Contains(plainScreen(m), "delete connection PG? used by beta") {
+		t.Fatalf("delete prompt:\n%s", plainScreen(m))
 	}
 	m = press(m, "n")
 	if m.ask != nil {
@@ -1026,24 +1036,27 @@ func TestHelpInWizards(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "n")
 	m = press(m, "?") // the name field types it
-	if m.help != nil {
+	if helpOpen(m) {
 		t.Fatal("? on a text field types")
 	}
-	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyF1})
+	mm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyF1})
 	m = mm.(Model)
-	if m.help == nil || !strings.Contains(m.View(), "ctrl+s") {
-		t.Fatalf("f1 help:\n%s", m.View())
+	if !helpOpen(m) || !strings.Contains(plainScreen(m), "ctrl+s") {
+		t.Fatalf("f1 help:\n%s", plainScreen(m))
 	}
 	m = press(m, "esc")
 	mm, _ = m.Update(keyDown)
 	m = press(mm.(Model), "?") // source: a list
-	if m.help == nil {
+	if !helpOpen(m) {
 		t.Fatal("? on a list opens help")
 	}
-	mm, _ = m.Update(keyRight)
-	m = mm.(Model)
-	if v := m.View(); !strings.Contains(v, "open list") {
-		t.Fatalf("forms page:\n%s", v)
+	groups := m.helpGroups()
+	var names []string
+	for _, g := range groups {
+		names = append(names, g.Name)
+	}
+	if got := strings.Join(names, ","); !strings.Contains(got, "Open list") || !strings.Contains(got, "Schedule") {
+		t.Fatalf("keys screen groups: %s", got)
 	}
 }
 
@@ -1052,8 +1065,8 @@ func TestNoConnectionsOpensConnectionForm(t *testing.T) {
 	os.Remove(opts.Connections)
 	m := loaded(t, opts)
 	m = press(m, "n")
-	if _, ok := m.wiz.(*connWizard); !ok || !strings.Contains(m.View(), "no connections") {
-		t.Fatalf("n without connections:\n%s", m.View())
+	if _, ok := m.wiz.(*connWizard); !ok || !strings.Contains(plainScreen(m), "no connections") {
+		t.Fatalf("n without connections:\n%s", plainScreen(m))
 	}
 }
 
@@ -1088,7 +1101,7 @@ func TestDetailCursorFollowsSelection(t *testing.T) {
 	m := loaded(t, testHome(t))
 	m = press(m, "enter") // alpha: streams things, copy
 	rows := func() (int, int) {
-		lines := strings.Split(m.View(), "\n")
+		lines := strings.Split(plainScreen(m), "\n")
 		thingsRow, copyRow := -1, -1
 		for i, l := range lines {
 			switch {
@@ -1101,19 +1114,19 @@ func TestDetailCursorFollowsSelection(t *testing.T) {
 		return thingsRow, copyRow
 	}
 	if a, b := rows(); a < 0 || b >= 0 {
-		t.Fatalf("cursor should start on things:\n%s", m.View())
+		t.Fatalf("cursor should start on things:\n%s", plainScreen(m))
 	}
 	m = press(m, "j")
 	if a, b := rows(); a >= 0 || b < 0 {
-		t.Fatalf("cursor should move to copy:\n%s", m.View())
+		t.Fatalf("cursor should move to copy:\n%s", plainScreen(m))
 	}
 	m = press(m, "j") // clamps at the last row
 	if _, b := rows(); b < 0 {
-		t.Fatalf("cursor should stay on copy:\n%s", m.View())
+		t.Fatalf("cursor should stay on copy:\n%s", plainScreen(m))
 	}
 	m = press(m, "k", "k")
 	if a, _ := rows(); a < 0 {
-		t.Fatalf("cursor should be back on things:\n%s", m.View())
+		t.Fatalf("cursor should be back on things:\n%s", plainScreen(m))
 	}
 }
 
@@ -1148,7 +1161,7 @@ func TestWizardEnterExploresDraftStream(t *testing.T) {
 	}
 	// ctrl+e on the picker previews the highlighted table and comes back to the picker
 	send(t, w, keyRunes("a"))
-	send(t, w, tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyCtrlE}) // past the * row
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyDown}, tea.KeyPressMsg{Code: 'e', Mod: tea.ModCtrl}) // past the * row
 	if w.explore == nil || w.explore.streamName != "things" || w.pick == nil {
 		t.Fatalf("ctrl+e: explore %v pick %v", w.explore, w.pick)
 	}
@@ -1223,7 +1236,7 @@ func TestDetailDefinitionPanel(t *testing.T) {
 		m = press(m, string(r))
 	}
 	m = press(m, "enter", "enter")
-	v := m.View()
+	v := plainScreen(m)
 	for _, want := range []string{"table    things", "where    id > 1", "steps    keep id | sort -id"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("definition missing %q:\n%s", want, v)
@@ -1342,25 +1355,25 @@ func TestF2F3MoveSteps(t *testing.T) {
 	if w.step != stepBasics || w.basics.cur != 1 {
 		t.Fatal("tab moves a field")
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyShiftTab})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift})
 	if w.step != stepBasics || w.basics.cur != 0 {
 		t.Fatal("shift+tab moves a field back")
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyF3})
 	if w.step != stepDefaults {
 		t.Fatalf("f3: step %d", w.step)
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyF2})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyF2})
 	if w.step != stepBasics {
 		t.Fatalf("f2: step %d", w.step)
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyF3})
 	walk(t, w) // defaults -> streams
-	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyF3})
 	if w.step != stepReview {
 		t.Fatalf("f3 on the streams step: %d", w.step)
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyF2})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyF2})
 	if w.step != stepStreams {
 		t.Fatalf("f2 on review: %d", w.step)
 	}
@@ -1368,12 +1381,12 @@ func TestF2F3MoveSteps(t *testing.T) {
 	if res, _ := w.key(keyEsc); res != wizCancel {
 		t.Fatalf("esc on streams: %v", res)
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyF2})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyF2})
 	if res, _ := w.key(keyEsc); res != wizCancel || w.step != stepDefaults {
 		t.Fatalf("esc on defaults: %v, step %d", res, w.step)
 	}
-	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
-	send(t, w, tea.KeyMsg{Type: tea.KeyF3})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyF3})
+	send(t, w, tea.KeyPressMsg{Code: tea.KeyF3})
 	if res, _ := w.key(keyEsc); res != wizCancel {
 		t.Fatalf("esc on review: %v", res)
 	}
@@ -1383,8 +1396,8 @@ func TestDuplicateReplication(t *testing.T) {
 	opts := testHome(t)
 	m := loaded(t, opts)
 	m = press(m, "D")
-	if m.view != viewWizard || !strings.Contains(m.View(), "Copy of alpha") {
-		t.Fatalf("D:\n%s", m.View())
+	if m.view != viewWizard || !strings.Contains(plainScreen(m), "Copy of alpha") {
+		t.Fatalf("D:\n%s", plainScreen(m))
 	}
 	w := m.wiz.(*repWizard)
 	if w.original != "" || w.draft.Name != "" || w.draft.From != "alpha" || len(w.draft.Streams) == 0 {

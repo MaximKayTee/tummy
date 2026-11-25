@@ -5,9 +5,10 @@ import (
 	"os"
 	"sync"
 	"time"
-	"tummy/internal/txt"
 
 	"github.com/mattn/go-isatty"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/engine"
 )
@@ -70,18 +71,18 @@ func (p *progress) line() string {
 	case engine.PhaseConnecting:
 		return fmt.Sprintf("%s connecting %s", frame, ev.Object)
 	case engine.PhaseQuerying:
-		return fmt.Sprintf("%s %s  querying  %s", frame, ev.Stream, txt.Dur(time.Since(p.started)))
+		return fmt.Sprintf("%s %s  querying  %s", frame, ev.Stream, txt.Rounded(time.Since(p.started)))
 	case engine.PhaseParents:
-		return fmt.Sprintf("%s %s  parent %s %s  %s", frame, ev.Stream, ev.Object, txt.Thousands(ev.Rows), txt.Dur(time.Since(p.started)))
+		return fmt.Sprintf("%s %s  parent %s %s  %s", frame, ev.Stream, ev.Object, txt.Thousands(ev.Rows), txt.Rounded(time.Since(p.started)))
 	case engine.PhaseFetching:
 		if n := ev.Note(); n != "" {
-			return fmt.Sprintf("%s %s  fetching %s  %s  %s", frame, ev.Stream, txt.Thousands(ev.Rows), n, txt.Dur(time.Since(p.started)))
+			return fmt.Sprintf("%s %s  fetching %s  %s  %s", frame, ev.Stream, txt.Thousands(ev.Rows), n, txt.Rounded(time.Since(p.started)))
 		}
-		return fmt.Sprintf("%s %s  fetching %s  %s", frame, ev.Stream, txt.Thousands(ev.Rows), txt.Dur(time.Since(p.started)))
+		return fmt.Sprintf("%s %s  fetching %s  %s", frame, ev.Stream, txt.Thousands(ev.Rows), txt.Rounded(time.Since(p.started)))
 	case engine.PhaseLoading:
-		return fmt.Sprintf("%s %s → %s  loading %s  %s", frame, ev.Stream, ev.Object, txt.Thousands(ev.Rows), txt.Dur(time.Since(p.started)))
+		return fmt.Sprintf("%s %s → %s  loading %s  %s", frame, ev.Stream, ev.Object, txt.Thousands(ev.Rows), txt.Rounded(time.Since(p.started)))
 	case engine.PhaseMerging:
-		return fmt.Sprintf("%s %s → %s  merging %s  %s", frame, ev.Stream, ev.Object, txt.Thousands(ev.Rows), txt.Dur(time.Since(p.started)))
+		return fmt.Sprintf("%s %s → %s  merging %s  %s", frame, ev.Stream, ev.Object, txt.Thousands(ev.Rows), txt.Rounded(time.Since(p.started)))
 	}
 	return ""
 }

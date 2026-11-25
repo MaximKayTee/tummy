@@ -75,6 +75,9 @@ func (e *Engine) plan(ctx context.Context, r *config.Replication, sample int) ([
 	if tgtConn.ReadOnly {
 		return nil, fmt.Errorf("conn %s: read_only, not a target", r.Target)
 	}
+	if !IsDatabase(tgtConn.Type) {
+		return nil, fmt.Errorf("conn %s: %s, not a target", r.Target, tgtConn.Type)
+	}
 	tp := tgtConn.DB()
 	tp.Create = true // a sqlite target the run would create: an empty file, as the run makes
 	tgt, err := db.Open(ctx, tp)
@@ -84,7 +87,11 @@ func (e *Engine) plan(ctx context.Context, r *config.Replication, sample int) ([
 	defer tgt.Close()
 	var streams []stream
 	var src *db.DB
-	if srcConn.Type == "api" {
+	if srcConn.Type == "azblob" {
+		for _, s := range r.Resolved {
+			streams = append(streams, plain(s))
+		}
+	} else if srcConn.Type == "api" {
 		ordered, err := orderByForEach(r.Resolved)
 		if err != nil {
 			return nil, err

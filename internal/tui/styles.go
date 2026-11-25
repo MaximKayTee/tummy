@@ -1,43 +1,75 @@
 package tui
 
 import (
-	"fmt"
+	_ "embed"
+	"image/color"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
+	"github.com/MaximKayTee/gotuitools/theme"
 )
+
+//go:embed themes/tummy.toml
+var themeDark []byte
+
+//go:embed themes/tummy-light.toml
+var themeLight []byte
+
+func init() {
+	theme.MustRegister("tummy", themeDark)
+	theme.MustRegister("tummy-light", themeLight)
+	th, _ := theme.Find("tummy")
+	applyTheme(th, true)
+}
 
 var (
-	colAccent  = lipgloss.AdaptiveColor{Light: "#5B4BDB", Dark: "#9D8CFF"}
-	colDim     = lipgloss.AdaptiveColor{Light: "#8A8A8A", Dark: "#6E6E6E"}
-	colText    = lipgloss.AdaptiveColor{Light: "#1A1A1A", Dark: "#E6E6E6"}
-	colOK      = lipgloss.AdaptiveColor{Light: "#1F8F4E", Dark: "#5BD58A"}
-	colErr     = lipgloss.AdaptiveColor{Light: "#C23B3B", Dark: "#FF6B6B"}
-	colWarn    = lipgloss.AdaptiveColor{Light: "#B7791F", Dark: "#F2C94C"}
-	colSelBg   = lipgloss.AdaptiveColor{Light: "#ECE9FF", Dark: "#2D2A45"}
-	colRule    = lipgloss.AdaptiveColor{Light: "#D9D9D9", Dark: "#3A3A3A"}
-	colHeaderF = lipgloss.AdaptiveColor{Light: "#5C5C5C", Dark: "#A0A0A0"}
+	colErr, colWarn color.Color
 
-	sTitle    = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
-	sDim      = lipgloss.NewStyle().Foreground(colDim)
-	sText     = lipgloss.NewStyle().Foreground(colText)
-	sOK       = lipgloss.NewStyle().Foreground(colOK)
-	sErr      = lipgloss.NewStyle().Foreground(colErr)
-	sWarn     = lipgloss.NewStyle().Foreground(colWarn)
-	sHeader   = lipgloss.NewStyle().Foreground(colHeaderF).Bold(true)
-	sSelected = lipgloss.NewStyle().Background(colSelBg).Bold(true)
-	sRule     = lipgloss.NewStyle().Foreground(colRule)
-	sKey      = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
-	sStatus   = lipgloss.NewStyle().Foreground(colText).Italic(true)
-	sBadgeOn  = lipgloss.NewStyle().Foreground(colOK)
-	sBadgeOff = lipgloss.NewStyle().Foreground(colDim)
-	sErrBox   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colErr).Padding(0, 1)
+	sTitle, sDim, sText, sOK, sErr, sWarn, sHeader, sSelected, sRule lipgloss.Style
+	sKey, sStatus, sBadgeOn, sBadgeOff, sErrBox                      lipgloss.Style
+
+	// curTheme is the theme the styles come from; darkBG is the terminal background.
+	curTheme theme.Theme
+	darkBG   bool
 )
+
+// applyTheme sets the styles from th. Scopes th lacks fall back to related ones.
+func applyTheme(th theme.Theme, dark bool) {
+	curTheme, darkBG = th, dark
+	style := func(scopes ...string) lipgloss.Style {
+		for _, sc := range scopes {
+			if st := th.Style(sc); st != (theme.Style{}) {
+				return st.Lip()
+			}
+		}
+		return lipgloss.NewStyle()
+	}
+	sTitle = style("ui.text.focus")
+	sDim = style("ui.text.inactive")
+	sText = style("ui.text")
+	sOK = style("tummy.ok", "markup.list.checked", "diff.plus")
+	sErr = style("error")
+	sWarn = style("warning")
+	sHeader = style("tummy.header", "markup.table.header", "ui.text.inactive")
+	sSelected = style("ui.selection")
+	sRule = style("ui.window")
+	sKey = style("ui.statusline.key", "ui.text.focus")
+	sStatus = style("tummy.status", "ui.text")
+	sBadgeOn = sOK
+	sBadgeOff = sDim
+	colErr, colWarn = th.Fg("error"), th.Fg("warning")
+	sErrBox = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colErr).Padding(0, 1)
+}
+
+// boxed renders s in the bordered style b, w wide inside the border.
+func boxed(b lipgloss.Style, w int, s string) string {
+	return b.Width(w + b.GetHorizontalBorderSize()).Render(s)
+}
 
 const (
 	glyphOK     = "✓"
@@ -61,7 +93,7 @@ func table(width int, cols []column, rows [][]string, selected int) []string {
 	var out []string
 	hdr := make([]string, len(cols))
 	for i, c := range cols {
-		hdr[i] = sHeader.Render(pad(c.Title, widths[i], c.Right))
+		hdr[i] = sHeader.Render(align(c.Title, widths[i], c.Right))
 	}
 	out = append(out, ansi.Truncate("  "+strings.Join(hdr, "  "), width, "…"))
 	for ri, row := range rows {
@@ -71,7 +103,7 @@ func table(width int, cols []column, rows [][]string, selected int) []string {
 			if i < len(row) {
 				v = row[i]
 			}
-			cells[i] = pad(v, widths[i], cols[i].Right)
+			cells[i] = align(v, widths[i], cols[i].Right)
 		}
 		line := ansi.Truncate("  "+strings.Join(cells, "  "), width, "…")
 		if ri == selected {
@@ -87,7 +119,7 @@ func selectedLine(line string, width int) string {
 	if line == "" {
 		line = " "
 	}
-	return sSelected.Render(sKey.Render("›") + pad(line[1:], max(width-1, 0), false))
+	return sSelected.Render(sKey.Render("›") + txt.Fit(line[1:], max(width-1, 0)))
 }
 
 // fit distributes width over columns. Fixed ones keep theirs; the others get what their
@@ -127,55 +159,15 @@ func fit(width int, cols []column, rows [][]string) []int {
 	return widths
 }
 
-func pad(s string, w int, right bool) string {
-	s = ansi.Truncate(s, w, "…")
-	gap := w - ansi.StringWidth(s)
-	if gap <= 0 {
-		return s
-	}
+// align fits s to w cells, right-aligned when right.
+func align(s string, w int, right bool) string {
 	if right {
-		return strings.Repeat(" ", gap) + s
+		return txt.FitLeft(s, w)
 	}
-	return s + strings.Repeat(" ", gap)
+	return txt.Fit(s, w)
 }
 
 func rule(width int) string { return sRule.Render(strings.Repeat("─", max(width, 0))) }
-
-func ago(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return strconv.Itoa(int(d.Minutes())) + "m ago"
-	case d < 24*time.Hour:
-		return strconv.Itoa(int(d.Hours())) + "h ago"
-	case d < 48*time.Hour:
-		return "yesterday"
-	}
-	return t.Local().Format("Jan 2")
-}
-
-func in(t *time.Time) string {
-	if t == nil {
-		return ""
-	}
-	d := time.Until(*t)
-	switch {
-	case d < 0:
-		return "now"
-	case d < time.Minute:
-		return "in " + strconv.Itoa(int(d.Seconds())) + "s"
-	case d < time.Hour:
-		return "in " + strconv.Itoa(int(d.Minutes())) + "m"
-	case d < 24*time.Hour:
-		return t.Local().Format("15:04")
-	}
-	return t.Local().Format("Jan 2 15:04")
-}
 
 func shortHome(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
@@ -185,11 +177,4 @@ func shortHome(p string) string {
 		return "~" + strings.TrimPrefix(p, h)
 	}
 	return p
-}
-
-func plural(n int, word string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, word)
-	}
-	return fmt.Sprintf("%d %ss", n, word)
 }

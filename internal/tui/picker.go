@@ -5,11 +5,13 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"tummy/internal/txt"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/MaximKayTee/gotuitools/fuzzy"
+	txt "github.com/MaximKayTee/gotuitools/text"
 )
 
 // picker is a list with a filter. Standalone it is a multi-select with / to filter and
@@ -39,7 +41,7 @@ func newPicker(title string, items []string, preselected []string) *picker {
 	ti := newInput()
 	ti.Prompt = "/"
 	ti.Placeholder = "filter"
-	ti.Width = 40
+	ti.SetWidth(40)
 	p := &picker{title: title, items: items, selected: map[string]bool{}, note: map[string]string{},
 		label: map[string]string{}, locked: map[string]bool{}, added: map[string]bool{}, filter: ti}
 	for _, s := range preselected {
@@ -134,39 +136,21 @@ func (p *picker) typed() string {
 // visible are the items matching the filter: names starting with it first, then names
 // with a word starting with it, then the rest that contain it.
 func (p *picker) visible() []string {
-	f := strings.ToLower(strings.TrimSpace(p.filter.Value()))
+	f := strings.TrimSpace(p.filter.Value())
 	if f == "" {
 		return p.items
 	}
-	var first, word, rest []string
+	var tiers [3][]string
 	for _, it := range p.items {
-		d := strings.ToLower(p.display(it))
-		i := strings.Index(d, f)
-		switch {
-		case i < 0:
-		case i == 0:
-			first = append(first, it)
-		case wordStart(d, f):
-			word = append(word, it)
-		default:
-			rest = append(rest, it)
+		if t := fuzzy.Tier(f, p.display(it)); t >= 0 && t < len(tiers) {
+			tiers[t] = append(tiers[t], it)
 		}
 	}
-	out := append(append(first, word...), rest...)
+	out := slices.Concat(tiers[0], tiers[1], tiers[2])
 	if t := p.typed(); t != "" {
 		out = append(out, t)
 	}
 	return out
-}
-
-// wordStart reports whether f starts a word of d after . _ - / or a space.
-func wordStart(d, f string) bool {
-	for i := 1; i < len(d); i++ {
-		if strings.ContainsRune("._-/ ", rune(d[i-1])) && strings.HasPrefix(d[i:], f) {
-			return true
-		}
-	}
-	return false
 }
 
 // chosen returns ticked items in list order, then ticked values typed in.
@@ -230,7 +214,7 @@ func (p *picker) update(msg tea.KeyMsg) (formResult, tea.Cmd) {
 			return formContinue, nil
 		}
 		var cmd tea.Cmd
-		p.filter, cmd = p.filter.Update(msg)
+		p.filter, cmd = p.filter.Update(teaMsg(msg))
 		p.cur = 0
 		return formContinue, cmd
 	}
@@ -258,7 +242,7 @@ func (p *picker) update(msg tea.KeyMsg) (formResult, tea.Cmd) {
 		p.cur = max(p.cur-dropRows, 0)
 	case "pgdown":
 		p.cur = min(p.cur+dropRows, max(len(vis)-1, 0))
-	case " ", "x", "right", "l":
+	case "space", "x", "right", "l":
 		if p.cur < len(vis) {
 			p.toggle(vis[p.cur])
 		}
@@ -311,7 +295,7 @@ func (p *picker) updateLive(msg tea.KeyMsg) (formResult, tea.Cmd) {
 	case "ctrl+end", "end":
 		p.cur = last
 		return formContinue, nil
-	case " ":
+	case "space":
 		if !p.single {
 			if it, ok := p.current(); ok {
 				p.toggle(it)
@@ -339,7 +323,7 @@ func (p *picker) updateLive(msg tea.KeyMsg) (formResult, tea.Cmd) {
 	}
 	before := p.filter.Value()
 	var cmd tea.Cmd
-	p.filter, cmd = p.filter.Update(msg)
+	p.filter, cmd = p.filter.Update(teaMsg(msg))
 	if p.filter.Value() != before {
 		p.cur = 0
 	}
@@ -422,7 +406,7 @@ func (p *picker) view(width, height int) []string {
 		if n := notes[it]; n != "" {
 			line += strings.Repeat(" ", max(nameW-lipgloss.Width(name), 0)) + sDim.Render("  "+n)
 		}
-		line = pad(line, width, false)
+		line = txt.Fit(line, width)
 		if i == p.cur {
 			line = selectedLine(line, width)
 		}

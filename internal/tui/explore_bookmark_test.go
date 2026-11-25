@@ -1,11 +1,13 @@
 package tui
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/MaximKayTee/gotuitools/sys"
 
 	"tummy/internal/config"
 	"tummy/internal/steps"
@@ -56,7 +58,7 @@ func TestBookmarkSaveOpenDelete(t *testing.T) {
 	if b == nil || b.Conn != "SRC" || b.Table != "things" || b.Steps != "filter id > 1 | keep id" || b.Rep != "" {
 		t.Fatalf("bookmark: %+v", b)
 	}
-	if v := strings.Join(e.view(100, 20), "\n"); !strings.Contains(v, "bookmark things") || !strings.Contains(v, "saved bookmarks.toml › things") {
+	if v := strings.Join(plain(e.view(100, 20)), "\n"); !strings.Contains(v, "bookmark things") || !strings.Contains(v, "saved bookmarks.toml › things") {
 		t.Fatalf("head:\n%s", v)
 	}
 
@@ -78,7 +80,7 @@ func TestBookmarkSaveOpenDelete(t *testing.T) {
 	if len(items) != 2 || items[0].mark == nil || items[0].name != "things" || items[1].mark != nil {
 		t.Fatalf("items: %+v", items)
 	}
-	if v := strings.Join(e2.view(100, 20), "\n"); !strings.Contains(v, "things  |  filter id > 1 | sort -id | keep id") {
+	if v := strings.Join(plain(e2.view(100, 20)), "\n"); !strings.Contains(v, "things  |  filter id > 1 | sort -id | keep id") {
 		t.Fatalf("list:\n%s", v)
 	}
 	press1(e2, keyEnter)
@@ -148,7 +150,7 @@ func TestBookmarkQueryAndNameCheck(t *testing.T) {
 	if !strings.HasPrefix(string(raw), "# kept\n") || !strings.Contains(string(raw), "[bookmark.small]\nconn = \"SRC\"\nsql = \"select id from things where id < 3\"\n") {
 		t.Fatalf("file:\n%s", raw)
 	}
-	if v := strings.Join(e.view(100, 20), "\n"); !strings.Contains(v, "bookmark small") {
+	if v := strings.Join(plain(e.view(100, 20)), "\n"); !strings.Contains(v, "bookmark small") {
 		t.Fatalf("head:\n%s", v)
 	}
 }
@@ -183,18 +185,13 @@ func TestTargetBookmarkNamesStream(t *testing.T) {
 }
 
 func TestCopySQL(t *testing.T) {
-	var buf bytes.Buffer
-	old := clipboardOut
-	clipboardOut = &buf
-	t.Cleanup(func() { clipboardOut = old })
 	e := openThings(t, testHome(t))
 	_, cmd := e.update(keyRunes("y"))
 	if cmd == nil {
 		t.Fatal("no copy")
 	}
-	cmd()
-	if got := buf.String(); !strings.HasPrefix(got, "\x1b]52;c;") || !strings.HasSuffix(got, "\a") {
-		t.Fatalf("osc52: %q", got)
+	if got, want := cmd(), sys.Copy(e.shownSQL())(); e.shownSQL() == "" || !reflect.DeepEqual(got, want) {
+		t.Fatalf("clipboard: %#v, want %#v", got, want)
 	}
 	if e.currentNote() != "sql copied" {
 		t.Fatalf("note: %q", e.currentNote())
@@ -202,7 +199,6 @@ func TestCopySQL(t *testing.T) {
 	// from the steps panel too
 	e.update(keyRunes("\t"))
 	e.focus = focusSteps
-	buf.Reset()
 	if _, cmd := e.update(keyRunes("y")); cmd == nil {
 		t.Fatal("no copy from steps")
 	}
@@ -216,7 +212,7 @@ func TestBenchRunsFull(t *testing.T) {
 	if cmd == nil || e.busy != "full run" {
 		t.Fatal("b runs")
 	}
-	if v := strings.Join(e.view(100, 20), "\n"); !strings.Contains(v, "◐ full run") {
+	if v := strings.Join(plain(e.view(100, 20)), "\n"); !strings.Contains(v, "◐ full run") {
 		t.Fatalf("head:\n%s", v)
 	}
 	if _, again := e.update(keyRunes("b")); again != nil {
@@ -227,7 +223,7 @@ func TestBenchRunsFull(t *testing.T) {
 	if e.busy != "" || !strings.HasPrefix(e.benchText, "full 2 rows  ") {
 		t.Fatalf("bench: %q", e.benchText)
 	}
-	if v := strings.Join(e.view(100, 20), "\n"); !strings.Contains(v, "full 2 rows") {
+	if v := strings.Join(plain(e.view(100, 20)), "\n"); !strings.Contains(v, "full 2 rows") {
 		t.Fatalf("head:\n%s", v)
 	}
 	// a new query drops the old timing
@@ -291,7 +287,7 @@ func TestDetailListsBookmarksUnderTheStream(t *testing.T) {
 	if len(rows) != 4 || rows[0].stream != "things" || rows[1].mark == nil || rows[1].mark.Name != "big" || rows[2].stream != "copy" || rows[3].mark == nil || rows[3].mark.Name != "lost" {
 		t.Fatalf("rows: %+v", rows)
 	}
-	v := m.View()
+	v := plainScreen(m)
 	if !strings.Contains(v, "› big") || !strings.Contains(v, "bookmark") || !strings.Contains(v, "› lost") {
 		t.Fatalf("view:\n%s", v)
 	}

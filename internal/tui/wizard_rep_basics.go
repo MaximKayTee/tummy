@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"tummy/internal/config"
 	"tummy/internal/db"
@@ -142,10 +142,10 @@ func (w *repWizard) applyBasics() {
 var defaultsKeys = []string{"mode", "primary_key", "update_key", "object", "records", "paginate", "page_size", "page_param", "size_param", "cursor_field", "cursor_param"}
 
 func (w *repWizard) buildDefaults() {
-	api := w.isAPI()
 	def := w.draft.Defaults
-	fields := fieldSubset(streamFields(def, nil, api), defaultsKeys...)
-	if !api {
+	w.defaultsFor = w.srcKind()
+	fields := fieldSubset(streamFields(def, nil, w.defaultsFor), defaultsKeys...)
+	if w.defaultsFor == srcDB {
 		for i, fl := range fields {
 			switch fl.Key {
 			case "primary_key":
@@ -199,7 +199,7 @@ func (w *repWizard) seenNotes() map[string]string {
 
 // discoverCols reads the columns of the draft's table streams once, for the defaults.
 func (w *repWizard) discoverCols() tea.Cmd {
-	if w.colsAsked || w.isAPI() {
+	if w.colsAsked || w.noTables() {
 		return nil
 	}
 	c, err := w.conns.Get(w.draft.Source)

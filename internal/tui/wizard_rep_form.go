@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"tummy/internal/blob"
 	"tummy/internal/config"
 	"tummy/internal/db"
 )
@@ -26,7 +27,7 @@ func (w *repWizard) streamForm(sd config.StreamDraft, cols []string) *form {
 }
 
 func (w *repWizard) streamFormKinds(sd config.StreamDraft, cols []string, kinds map[string]db.Kind) *form {
-	if cols != nil && kinds != nil && !w.isAPI() {
+	if cols != nil && kinds != nil && w.srcKind() == srcDB {
 		if w.colsSeen == nil {
 			w.colsSeen = map[string][]db.Column{}
 		}
@@ -36,10 +37,9 @@ func (w *repWizard) streamFormKinds(sd config.StreamDraft, cols []string, kinds 
 		}
 		w.colsSeen[sd.Name] = seen
 	}
-	api := w.isAPI()
-	fs := streamFieldsOf(sd.Stream, cols, kinds, w.parents.get, api)
+	fs := streamFieldsOf(sd.Stream, cols, kinds, w.parents.get, w.srcKind())
 	var name *field
-	if api {
+	if w.srcKind() != srcDB {
 		name = text("name", "Name", "the target table unless object is set").eg("users").def(sd.Name)
 	} else {
 		name = combo("name", "Name", "schema.*: every table   any name with sql", w.tableOptions()...).def(sd.Name)
@@ -124,11 +124,31 @@ func sinceOptions(cols []string) []string {
 }
 
 // streamFields lists the editable keys of a stream, filled from s. With cols known the
-// column keys are lists of them; api picks the endpoint keys over the table ones. The
+// column keys are lists of them; src picks the endpoint or file keys over the table ones. The
 // replication wizard and the explorer build their stream forms from it; streamFromFields
 // reads a form back.
-func streamFields(s config.Stream, cols []string, api bool) []*field {
-	return streamFieldsOf(s, cols, nil, nil, api)
+func streamFields(s config.Stream, cols []string, src srcKind) []*field {
+	return streamFieldsOf(s, cols, nil, nil, src)
+}
+
+// srcKind is what a replication reads from: database tables, an API, or files.
+type srcKind int
+
+const (
+	srcDB srcKind = iota
+	srcAPI
+	srcFiles
+)
+
+// kindOfConn is the source kind of a connection type.
+func kindOfConn(typ string) srcKind {
+	switch typ {
+	case "api":
+		return srcAPI
+	case "azblob":
+		return srcFiles
+	}
+	return srcDB
 }
 
 // keyKinds are the column kinds an update key can compare; nil kinds: any column.
@@ -164,7 +184,8 @@ func kindNotes(kinds map[string]db.Kind) map[string]string {
 // streamFieldsOf is streamFields with the kinds of the columns, so key lists offer only
 // loaded columns an update key can compare, and the for_each parent's columns for the
 // keys that name them.
-func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, parentCols func(*form) []string, api bool) []*field {
+func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, parentCols func(*form) []string, src srcKind) []*field {
+	api := src == srcAPI
 	if parentCols == nil {
 		parentCols = func(*form) []string { return nil }
 	}
@@ -204,6 +225,14 @@ func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, pa
 		if s.ForEach != "" {
 			fs[len(fs)-4].Options = []string{"", s.ForEach}
 		}
+	} else if src == srcFiles {
+		fs = append(fs,
+			text("path", "Path", "* ? [123] {a,b}; * stops at /").eg("reports/file[123].csv   in/*.{csv,xlsx}").def(s.Path).required().check(func(v string) error {
+				_, err := blob.Patterns(v)
+				return err
+			}),
+			text("sheet", "Sheet", "xlsx; blank: the first").def(s.Sheet),
+		)
 	} else {
 		// sql, columns and steps are shaped in explore, on the data
 		fs = append(fs, text("where", "Where", "source SQL").eg("status = 'paid'").def(s.Where))
@@ -253,7 +282,7 @@ func streamFieldsOf(s config.Stream, cols []string, kinds map[string]db.Kind, pa
 		text("range", "Range", "on the update key").eg("2026-01-01,2026-02-01   1,1000").def(s.Range).when(in("mode", "backfill")).required(),
 		text("limit", "Limit", "blank: all rows").eg("1000").def(zeroBlank(s.Limit)).check(isInt),
 	)
-	if !api {
+	if src == srcDB {
 		fs = append(fs, text("query_timeout", "Query timeout", "").eg("30s   5m").def(s.QueryTimeout).check(func(v string) error {
 			if d, err := time.ParseDuration(v); err != nil || d <= 0 {
 				return errors.New("a duration: 30s, 5m")
@@ -343,7 +372,7 @@ func streamFromFields(f *form, base config.Stream) config.Stream {
 		"params_in": &s.ParamsIn, "for_each": &s.ForEach, "sql": &s.SQL, "where": &s.Where,
 		"skip_existing": &s.SkipExisting, "for_each_since": &s.ForEachSince,
 		"steps": &s.Steps, "object": &s.Object, "update_key": &s.UpdateKey, "since_param": &s.SinceParam,
-		"sorted": &s.Sorted, "range": &s.Range, "query_timeout": &s.QueryTimeout,
+		"sorted": &s.Sorted, "range": &s.Range, "query_timeout": &s.QueryTimeout, "sheet": &s.Sheet,
 	} {
 		str(key, dst, "")
 	}

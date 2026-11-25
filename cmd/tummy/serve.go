@@ -16,6 +16,7 @@ import (
 	"tummy/internal/config"
 	"tummy/internal/daemon"
 	"tummy/internal/db"
+	"tummy/internal/engine"
 	"tummy/internal/state"
 )
 
@@ -339,8 +340,15 @@ func checkFile(ctx context.Context, path string, conns *config.Connections, sche
 		return c
 	}
 	src := conn("source", r.Source)
-	if tgt := conn("target", r.Target); tgt != nil && tgt.Type == "api" {
-		ok = fail(fmt.Errorf("target %s is an API connection", r.Target))
+	if tgt := conn("target", r.Target); tgt != nil && !engine.IsDatabase(tgt.Type) {
+		ok = fail(fmt.Errorf("target %s is an %s connection", r.Target, tgt.Type))
+	}
+	if src != nil && src.Type == "azblob" {
+		for _, s := range r.Resolved {
+			if err := engine.CheckFileStream(s); err != nil {
+				ok = fail(err)
+			}
+		}
 	}
 	switch {
 	case r.Schedule == "":
@@ -367,7 +375,7 @@ func checkFile(ctx context.Context, path string, conns *config.Connections, sche
 	for _, s := range r.Resolved {
 		wild = wild || s.IsWildcard()
 	}
-	if wild && src != nil && src.Type != "api" {
+	if wild && src != nil && engine.IsDatabase(src.Type) {
 		d, err := db.Open(ctx, src.DB())
 		if err != nil {
 			ok = fail(err)

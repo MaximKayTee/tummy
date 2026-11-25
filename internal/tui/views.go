@@ -7,14 +7,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"tummy/internal/engine"
-	"tummy/internal/txt"
 
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 	"tummy/internal/db"
+	"tummy/internal/engine"
 	"tummy/internal/state"
 )
 
@@ -27,11 +29,15 @@ const (
 // lines of keys under its rule.
 func (m Model) bodyHeight() int { return max(m.height-headerLines-len(m.footer()), 3) }
 
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	v := tea.NewView(m.screen())
+	v.AltScreen = true
+	return v
+}
+
+func (m Model) screen() string {
 	var body []string
 	switch {
-	case m.help != nil:
-		body = m.helpBody()
 	case m.view == viewDetail:
 		body = m.detailView()
 	default:
@@ -60,7 +66,7 @@ func (m Model) View() string {
 	for i, l := range body {
 		body[i] = ansi.Truncate(l, m.width, "…")
 	}
-	return strings.Join(append(append(m.header(), body...), m.footer()...), "\n")
+	return m.ui.modals.View(strings.Join(append(append(m.header(), body...), m.footer()...), "\n"), m.width)
 }
 
 // window keeps the first line (table header) and scrolls the rest.
@@ -109,9 +115,6 @@ func (m Model) header() []string {
 			crumb(m.wiz.title())
 		}
 	}
-	if m.help != nil {
-		crumb("help")
-	}
 	right := m.daemonBadge()
 	room := m.width - lipgloss.Width(right) - 2
 	title := sTitle.Render("tummy")
@@ -146,7 +149,7 @@ func (m Model) daemonBadge() string {
 	case d.Alive():
 		return sWarn.Render("● daemon") + sDim.Render(" serves "+txt.Clean(shortHome(d.Home)))
 	case d != nil:
-		return sErr.Render("○ daemon") + sDim.Render(" last seen "+ago(d.Heartbeat))
+		return sErr.Render("○ daemon") + sDim.Render(" last seen "+txt.Since(d.Heartbeat, time.Now()))
 	}
 	return sDim.Render("○ no daemon")
 }
@@ -167,8 +170,6 @@ func (m Model) footer() []string {
 	switch {
 	case m.ask != nil:
 		left, text = sWarn.Render(txt.Clean(m.ask.text)), true
-	case m.help != nil:
-		left, right = helpLine("←/→", "page", "↑/↓ pgup/pgdn", "scroll"), helpLine("esc", "close")
 	case m.view == viewWizard && m.wiz != nil:
 		if f, ok := m.wiz.(footerer); ok {
 			left, right = f.footer()
@@ -176,7 +177,7 @@ func (m Model) footer() []string {
 			left = m.wiz.help()
 		}
 		left, right = escRight(left, right)
-		right = strings.TrimSpace(helpLine("f1", "help") + "  " + right)
+		right = strings.TrimSpace(m.hints(modeWizard, "help", "help") + "  " + right)
 		if recent {
 			left, text = statusLine(), true
 		}
@@ -188,9 +189,9 @@ func (m Model) footer() []string {
 			left, text = statusLine(), true
 		}
 		if m.view == viewList {
-			right = helpLine("?", "help", "q", "quit")
+			right = m.hints(modeList, "help", "help", "quit", "quit")
 		} else {
-			right = helpLine("?", "help", "esc", "back")
+			right = m.hints(m.mode(), "help", "help", "back", "back")
 		}
 	}
 	if text {
@@ -289,31 +290,32 @@ func joinFooter(left, right string, width int) string {
 }
 
 func (m Model) shortHelp() string {
+	mode := m.mode()
 	switch m.view {
 	case viewList:
-		return helpLine("enter", "open", "n", "new", "E", "edit", "D", "duplicate", "r", "run", "ctrl+r", "run detached", "t", "dry run", "e", "on/off", "d", "delete", "c", "connections", "H", "history", "/", "filter")
+		return m.hints(mode, "rep.open", "open", "rep.new", "new", "rep.edit", "edit", "rep.duplicate", "duplicate", "rep.run", "run", "rep.run.detached", "run detached", "rep.plan", "dry run", "rep.toggle", "on/off", "rep.delete", "delete", "view.conns", "connections", "view.history", "history", "filter", "filter")
 	case viewDetail:
-		pairs := []string{"E", "edit", "a", "add", "r", "run", "ctrl+r", "run detached", "t", "dry run", "s", "run stream", "S", "stream detached", "e", "on/off", "d", "delete", "enter", m.detailEnterWord(), "p", "preview", "H", "history"}
+		pairs := []string{"stream.edit", "edit", "stream.add", "add", "rep.run", "run", "rep.run.detached", "run detached", "rep.plan", "dry run", "stream.run", "run stream", "stream.run.detached", "stream detached", "stream.toggle", "on/off", "stream.delete", "delete", "stream.open", m.detailEnterWord(), "stream.preview", "preview", "stream.history", "history"}
 		if rep, ok := m.rep(m.repName); ok && rep.Running > 0 {
-			pairs = append(pairs, "x", "cancel run", "C", "commit run")
+			pairs = append(pairs, "rep.cancel", "cancel run", "rep.commit", "commit run")
 		}
-		return helpLine(pairs...)
+		return m.hints(mode, pairs...)
 	case viewHistory:
-		return helpLine("enter", "details", "d", "forget", "/", "filter")
+		return m.hints(mode, "run.open", "details", "run.forget", "forget", "filter", "filter")
 	case viewRun:
 		if m.planning {
-			return helpLine("esc", "back")
+			return m.hints(mode, "back", "back")
 		}
 		if m.planName != "" {
-			return helpLine("r", "run", "t", fmt.Sprintf("test load %d rows", engine.SampleRows), "↑/↓ pgup/pgdn", "scroll")
+			return m.hints(mode, "run.again", "run", "run.testload", fmt.Sprintf("test load %d rows", engine.SampleRows)) + keySep + helpLine("↑/↓ pgup/pgdn", "scroll")
 		}
-		return helpLine("r", "run again", "E", "edit", "↑/↓ pgup/pgdn", "scroll")
+		return m.hints(mode, "run.again", "run again", "run.edit", "edit") + keySep + helpLine("↑/↓ pgup/pgdn", "scroll")
 	case viewConns:
-		pairs := []string{"enter", "explore", "n", "new", "E", "edit", "t", "test", "d", "delete", "/", "filter"}
+		pairs := []string{"conn.explore", "explore", "conn.new", "new", "conn.edit", "edit", "conn.test", "test", "conn.delete", "delete", "filter", "filter"}
 		if c, ok := at(m.visibleConns(), m.cursor[viewConns]); ok && m.missingFile(c.Name) != "" {
-			pairs = append([]string{"c", "create file"}, pairs...)
+			pairs = append([]string{"conn.create", "create file"}, pairs...)
 		}
-		return helpLine(pairs...)
+		return m.hints(mode, pairs...)
 	}
 	return ""
 }
@@ -336,128 +338,6 @@ func (m Model) detailEnterWord() string {
 		return "error"
 	}
 	return "data"
-}
-
-// ---------- help ----------
-
-type helpPage struct {
-	title string
-	lines []string
-}
-
-func helpRows(rows [][2]string) []string {
-	w := 0
-	for _, r := range rows {
-		w = max(w, lipgloss.Width(r[0]))
-	}
-	out := make([]string, len(rows))
-	for i, r := range rows {
-		out[i] = "  " + sKey.Render(pad(r[0], w, false)) + "  " + r[1]
-	}
-	return out
-}
-
-func (m Model) helpPages() []helpPage {
-	var keys []string
-	section := func(title string, rows [][2]string) {
-		if len(rows) == 0 {
-			return
-		}
-		if len(keys) > 0 {
-			keys = append(keys, "")
-		}
-		keys = append(keys, " "+sHeader.Render(title))
-		keys = append(keys, helpRows(rows)...)
-	}
-	switch m.view {
-	case viewWizard:
-		if kh, ok := m.wiz.(keyHelper); ok {
-			section(kh.keyHelp())
-		}
-		section("anywhere", [][2]string{{"f1", "help"}, {"?", "help, when not typing"}, {"ctrl+c", "quit; asks when there are changes or runs"}, {"ctrl+z", "suspend; fg resumes"}})
-	case viewList:
-		section("replications", [][2]string{
-			{"enter", "streams of the replication"}, {"n", "new replication"}, {"E", "edit"}, {"D", "duplicate: a new replication with its streams and defaults"}, {"e", "on/off for the daemon"},
-			{"d", "delete the file (y/n)"}, {"r", "run now"}, {"ctrl+r", "run now as its own process; survives quitting the TUI"}, {"t", "dry run: target table, action, source query and columns per stream, nothing written"}, {"x", "cancel a running run (y/n)"}, {"C", "commit a running run: stop reading, write what is loaded, end as ok (y/n)"}, {"H", "run history"}, {"c", "connections"},
-		})
-	case viewDetail:
-		section("streams", [][2]string{
-			{"enter", "loaded data in the target; a failed stream: its run; a bookmark: its query"}, {"p", "source preview; steps there are not saved to the stream"}, {"E", "edit the stream; its preview saves with ctrl+s"}, {"a", "add tables or an endpoint"},
-			{"e", "stream on/off; (replication): the replication"}, {"d", "delete the stream or bookmark (y/n); from a table pattern: exclude it; run history only: forget the runs"},
-			{"r", "run every stream"}, {"ctrl+r", "run every stream as its own process; survives quitting the TUI"}, {"s", "run the stream"}, {"S", "run the stream as its own process"},
-			{"x", "cancel the run (y/n)"}, {"C", "commit the run: stop reading, write what is loaded, end as ok (y/n)"}, {"H", "history of the stream"},
-		})
-	case viewHistory:
-		section("history", [][2]string{{"enter", "run details"}, {"d", "forget the run (y/n); the one before it becomes the last"}, {"/", "filter"}})
-	case viewRun:
-		if m.planName != "" {
-			section("dry run", [][2]string{{"r", "run it"}, {"t", fmt.Sprintf("test load: the first %d rows per stream into a copy of the run's temp table, rolled back", engine.SampleRows)}, {"↑/↓ pgup/pgdn", "scroll"}})
-			break
-		}
-		section("run", [][2]string{{"r", "run again"}, {"E", "edit the stream, else the connection in the error"}, {"↑/↓ pgup/pgdn", "scroll"}})
-	case viewConns:
-		section("connections", [][2]string{
-			{"enter", "explore tables"}, {"n", "new connection"}, {"E", "edit"}, {"t", "test"},
-			{"d", "delete (y/n)"}, {"c", "create a missing sqlite file"},
-		})
-	}
-	if m.view != viewWizard {
-		section("move", [][2]string{
-			{"↑/↓  k/j", "move"}, {"pgup/pgdn", "page"}, {"g/G", "top / bottom"}, {"enter  →  l", "open"},
-			{"esc  ←  h  backspace", "back"}, {"/", "filter"}, {"R", "refresh"}, {"q", "back; quit on the list"},
-		})
-	}
-	keys = append(keys, "",
-		" "+sHeader.Render("files"),
-		"  "+sDim.Render("config       ")+txt.Clean(shortHome(m.opts.Home)),
-		"  "+sDim.Render("connections  ")+txt.Clean(shortHome(m.opts.Connections)),
-		"  "+sDim.Render("state        ")+txt.Clean(shortHome(m.opts.State.Path)))
-
-	forms := []string{" " + sHeader.Render("fields")}
-	forms = append(forms, helpRows([][2]string{
-		{"tab  ↓", "next field"}, {"shift+tab  ↑", "previous field"}, {"enter", "next field; open a list; on the last field: apply"},
-		{"pgup/pgdn", "five fields"}, {"←/→", "cycle a list's value"}, {"space", "on/off; open a list"},
-		{"type", "on a list: open it filtered"}, {"ctrl+s", "save"}, {"esc", "back"},
-	})...)
-	forms = append(forms, "", " "+sHeader.Render("open list"))
-	forms = append(forms, helpRows([][2]string{
-		{"type", "filter"}, {"↑/↓  pgup/pgdn", "move"}, {"home/end", "first / last"}, {"space", "tick"},
-		{"ctrl+a / ctrl+n", "tick all / none shown"}, {"enter", "pick; done"}, {"esc", "close, no change"},
-		{"new", "typed value"},
-	})...)
-
-	sched := []string{" " + sHeader.Render("schedule") + "  " + sDim.Render("minute  hour  day  month  weekday, UTC")}
-	sched = append(sched, helpRows([][2]string{
-		{"*/15 * * * *", "every 15 min"}, {"0 * * * *", "hourly"}, {"30 3 * * *", "03:30 UTC daily"},
-		{"0 6 * * 1-5", "06:00 UTC Mon-Fri"}, {"0 0 1 * *", "00:00 UTC on the 1st"}, {"@every 10m", "every 10 min"},
-		{"@hourly  @daily", "0 * * * *   0 0 * * *"}, {"CRON_TZ=Europe/Berlin 0 6 * * *", "06:00 Berlin time"},
-	})...)
-	sched = append(sched, "", "  "+sDim.Render("*  any    */n  every n    a-b  range    a,b  list    weekday 0-6, 0 Sunday"))
-	return []helpPage{{"keys", keys}, {"forms", forms}, {"schedule", sched}}
-}
-
-func (m Model) helpBody() []string {
-	pages := m.helpPages()
-	h := *m.help
-	h.page = min(h.page, len(pages)-1)
-	var tabs []string
-	for i, p := range pages {
-		if i == h.page {
-			tabs = append(tabs, sKey.Render(p.title))
-		} else {
-			tabs = append(tabs, sDim.Render(p.title))
-		}
-	}
-	out := []string{" " + strings.Join(tabs, sDim.Render("  ·  ")), ""}
-	lines := pages[h.page].lines
-	rows := max(m.bodyHeight()-len(out), 1)
-	off := min(h.offset, max(len(lines)-rows, 0))
-	end := min(off+rows, len(lines))
-	if end < len(lines) {
-		end = max(end-1, off)
-		return append(append(out, lines[off:end]...), "  "+sDim.Render(fmt.Sprintf("↓ %d more", len(lines)-end)))
-	}
-	return append(out, lines[off:end]...)
 }
 
 // ---------- replication list ----------
@@ -517,15 +397,15 @@ func (m Model) lastRunCell(r replication) string {
 	case len(r.Last) == 0:
 		return sDim.Render(glyphNever + " never")
 	case r.Failed > 0 && r.Last["*"].Status == "error":
-		return sErr.Render(glyphErr+" failed") + sDim.Render("  "+ago(r.LastAt))
+		return sErr.Render(glyphErr+" failed") + sDim.Render("  "+txt.Since(r.LastAt, time.Now()))
 	case r.Failed > 0:
-		return sErr.Render(fmt.Sprintf("%s %s failed", glyphErr, plural(r.Failed, "stream"))) + sDim.Render("  "+ago(r.LastAt))
+		return sErr.Render(fmt.Sprintf("%s %s failed", glyphErr, txt.Plural(int64(r.Failed), "stream"))) + sDim.Render("  "+txt.Since(r.LastAt, time.Now()))
 	case r.Stopped > 0:
-		return sWarn.Render(glyphSkip+" cancelled") + sDim.Render("  "+ago(r.LastAt))
+		return sWarn.Render(glyphSkip+" cancelled") + sDim.Render("  "+txt.Since(r.LastAt, time.Now()))
 	case r.Skipped > 0 && r.OK == 0:
-		return sWarn.Render(glyphSkip+" skipped") + sDim.Render("  "+ago(r.LastAt))
+		return sWarn.Render(glyphSkip+" skipped") + sDim.Render("  "+txt.Since(r.LastAt, time.Now()))
 	}
-	return sOK.Render(glyphOK+" ok") + sDim.Render("  "+txt.Thousands(r.Rows)+" rows  "+ago(r.LastAt))
+	return sOK.Render(glyphOK+" ok") + sDim.Render("  "+txt.Thousands(r.Rows)+" rows  "+txt.Since(r.LastAt, time.Now()))
 }
 
 func (m Model) nextCell(r replication) string {
@@ -541,7 +421,10 @@ func (m Model) nextCell(r replication) string {
 	case !m.daemonServes():
 		return sDim.Render("no daemon")
 	}
-	return in(r.Next)
+	if r.Next == nil {
+		return ""
+	}
+	return txt.Until(*r.Next, time.Now())
 }
 
 // ---------- replication detail ----------
@@ -553,7 +436,7 @@ func (m Model) detailView() []string {
 	}
 	if rep.Err != "" {
 		return append([]string{"", " " + sDim.Render(txt.Clean(shortHome(rep.Path))), ""},
-			strings.Split(sErrBox.Width(max(m.width-4, 20)).Render(txt.CleanText(rep.Err)), "\n")...)
+			strings.Split(boxed(sErrBox, max(m.width-4, 20), txt.CleanText(rep.Err)), "\n")...)
 	}
 	meta := sDim.Render("source ") + sText.Render(txt.Clean(rep.Source)) + sDim.Render("   target ") + sText.Render(txt.Clean(rep.Target)) +
 		sDim.Render("   mode ") + sText.Render(txt.Clean(cmp.Or(rep.Mode, "full-refresh")))
@@ -632,9 +515,9 @@ func (m Model) detailView() []string {
 			if ts, ok := tableStat(m.snap.Tables, rep.Target, run.Object); ok {
 				size = sizeText(ts.Bytes)
 			}
-			row = append(row, ago(run.Started), txt.Dur(run.Duration()), txt.Thousands(run.Rows), sDim.Render(size), m.statusCell(run))
+			row = append(row, txt.Since(run.Started, time.Now()), txt.Rounded(run.Duration()), txt.Thousands(run.Rows), sDim.Render(size), m.statusCell(run))
 		case ran:
-			row = append(row, ago(run.Started), txt.Thousands(run.Rows), m.statusCell(run))
+			row = append(row, txt.Since(run.Started, time.Now()), txt.Thousands(run.Rows), m.statusCell(run))
 		default:
 			row = append(row, sDim.Render("never"))
 		}
@@ -653,7 +536,7 @@ func (m Model) detailView() []string {
 				if run.Status != "error" {
 					box = box.BorderForeground(colWarn)
 				}
-				def = strings.Split(box.Width(max(m.width-4, 20)).Render(txt.CleanText(run.Error)), "\n")
+				def = strings.Split(boxed(box, max(m.width-4, 20), txt.CleanText(run.Error)), "\n")
 				if len(def) > 5 {
 					def = append(def[:4], sErr.Render(" …  enter: the whole error"))
 				}
@@ -721,7 +604,7 @@ func (m Model) definition(s config.ResolvedStream, source string) []string {
 	var out []string
 	row := func(k, v string) {
 		if v != "" {
-			out = append(out, " "+sDim.Render(pad(k, 8, false))+" "+ansi.Truncate(txt.Clean(v), max(m.width-11, 10), "…"))
+			out = append(out, " "+sDim.Render(txt.Fit(k, 8))+" "+ansi.Truncate(txt.Clean(v), max(m.width-11, 10), "…"))
 		}
 	}
 	num := func(n int) string {
@@ -849,7 +732,7 @@ func (m Model) historyView() []string {
 		}
 		row = append(row, r.Started.Local().Format(started))
 		if wide {
-			row = append(row, txt.Dur(r.Duration()), txt.Thousands(r.Rows), sDim.Render(txt.Clean(r.Trigger)), m.statusCell(r))
+			row = append(row, txt.Rounded(r.Duration()), txt.Thousands(r.Rows), sDim.Render(txt.Clean(r.Trigger)), m.statusCell(r))
 		} else {
 			row = append(row, txt.Thousands(r.Rows), sDim.Render(txt.Clean(r.Trigger)), m.statusCell(r))
 		}
@@ -889,7 +772,7 @@ func planText(rows []engine.PlanRow, width int) string {
 	if sampled > 0 {
 		parts = append(parts, fmt.Sprintf("test load %d/%d ok", sampled-failed, sampled))
 	}
-	b.WriteString(sHeader.Render(plural(len(rows), "stream")) + sDim.Render("   "+strings.Join(parts, "   ")) + "\n\n")
+	b.WriteString(sHeader.Render(txt.Plural(int64(len(rows)), "stream")) + sDim.Render("   "+strings.Join(parts, "   ")) + "\n\n")
 	for i, p := range rows {
 		if i > 0 {
 			b.WriteString("\n")
@@ -933,12 +816,12 @@ func planColumnsText(b *strings.Builder, cols []engine.PlanColumn, width int) {
 	wn, ws, wt = min(wn, 32), min(ws, 20), min(wt, 24)
 	b.WriteString("\n")
 	for _, c := range cols {
-		l := "    " + sText.Render(pad(txt.Clean(c.Name), wn, false)) + "  " + sDim.Render(pad(txt.Clean(orDash(c.Source)), ws, false)) +
+		l := "    " + sText.Render(txt.Fit(txt.Clean(c.Name), wn)) + "  " + sDim.Render(txt.Fit(txt.Clean(orDash(c.Source)), ws)) +
 			sDim.Render("  →  ")
 		if c.Note == "" {
 			l += sText.Render(c.Target)
 		} else {
-			l += sText.Render(pad(c.Target, wt, false)) + "   " + sWarn.Render(c.Note)
+			l += sText.Render(txt.Fit(c.Target, wt)) + "   " + sWarn.Render(c.Note)
 		}
 		b.WriteString(ansi.Truncate(l, width, "…") + "\n")
 	}
@@ -956,8 +839,8 @@ func planSampleText(b *strings.Builder, s *engine.PlanSample, width int) {
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, label, sErr.Width(max(width-15, 20)).Render(glyphErr+" "+msg)) + "\n")
 		return
 	}
-	l := label + sOK.Render(plural(int(s.Rows), "row")+" loaded") +
-		sDim.Render("   read "+txt.Dur(s.Read)+"   load "+txt.Dur(s.Load)+"   rolled back")
+	l := label + sOK.Render(txt.Plural(s.Rows, "row")+" loaded") +
+		sDim.Render("   read "+txt.Rounded(s.Read)+"   load "+txt.Rounded(s.Load)+"   rolled back")
 	b.WriteString(ansi.Truncate(l, width, "…") + "\n")
 	if s.Stripped > 0 {
 		b.WriteString("    " + sWarn.Render(fmt.Sprintf("           NUL bytes removed from %d values", s.Stripped)) + "\n")
@@ -966,7 +849,7 @@ func planSampleText(b *strings.Builder, s *engine.PlanSample, width int) {
 
 func runText(r state.Run, width int) string {
 	var b strings.Builder
-	w := func(k, v string) { fmt.Fprintf(&b, "%s  %s\n", sDim.Render(pad(k, 12, false)), v) }
+	w := func(k, v string) { fmt.Fprintf(&b, "%s  %s\n", sDim.Render(txt.Fit(k, 12)), v) }
 	w("replication", txt.Clean(r.Replication))
 	w("stream", txt.Clean(streamLabel(r.Stream)))
 	w("object", txt.Clean(orDash(r.Object)))
@@ -975,7 +858,7 @@ func runText(r state.Run, width int) string {
 	if r.Ended != nil {
 		w("ended", r.Ended.Local().Format(time.DateTime))
 	}
-	w("duration", txt.Dur(r.Duration()))
+	w("duration", txt.Rounded(r.Duration()))
 	w("rows", txt.Thousands(r.Rows))
 	switch r.Status {
 	case "error":
@@ -992,7 +875,7 @@ func runText(r state.Run, width int) string {
 		if r.Status != "error" {
 			box = box.BorderForeground(colWarn)
 		}
-		b.WriteString("\n" + box.Width(max(width-2, 20)).Render(txt.CleanText(r.Error)) + "\n")
+		b.WriteString("\n" + boxed(box, max(width-2, 20), txt.CleanText(r.Error)) + "\n")
 	}
 	return b.String()
 }
@@ -1003,9 +886,9 @@ func (m Model) runView() []string {
 		if m.planSample {
 			word = fmt.Sprintf(" test loading %d rows per stream, rolled back", engine.SampleRows)
 		}
-		return []string{"", "  " + sWarn.Render(m.spin.View()+word) + sDim.Render("  "+txt.Dur(time.Since(m.planStart).Round(time.Second)))}
+		return []string{"", "  " + sWarn.Render(m.spin.View()+word) + sDim.Render("  "+txt.Rounded(time.Since(m.planStart).Round(time.Second)))}
 	}
-	m.vp.Height = max(m.bodyHeight()-1, 3)
+	m.vp.SetHeight(max(m.bodyHeight()-1, 3))
 	return append([]string{""}, strings.Split(m.vp.View(), "\n")...)
 }
 
@@ -1021,7 +904,7 @@ func (m Model) connsView() []string {
 	for _, c := range conns {
 		size := ""
 		if cs, ok := m.snap.ConnStats[c.Name]; ok {
-			size = sizeText(cs.Bytes) + sDim.Render("  "+ago(cs.Refreshed))
+			size = sizeText(cs.Bytes) + sDim.Render("  "+txt.Since(cs.Refreshed, time.Now()))
 		}
 		test := ""
 		switch {
@@ -1034,7 +917,7 @@ func (m Model) connsView() []string {
 				if res.Err != nil {
 					test = sErr.Render(glyphErr + " " + txt.Clean(txt.FirstLine(strings.TrimPrefix(res.Err.Error(), "conn "+c.Name+": "))))
 				} else {
-					test = sOK.Render(glyphOK+" ok") + sDim.Render("  "+txt.Dur(res.Took))
+					test = sOK.Render(glyphOK+" ok") + sDim.Render("  "+txt.Rounded(res.Took))
 				}
 			}
 		}
@@ -1047,7 +930,7 @@ func (m Model) connsView() []string {
 	out := table(m.width, cols, rows, m.cursor[viewConns])
 	if cur, ok := at(conns, m.cursor[viewConns]); ok && !m.testing[cur.Name] {
 		if res, ok := m.connResults[cur.Name]; ok && res.Err != nil {
-			box := strings.Split(sErrBox.Width(max(m.width-4, 20)).Render(txt.CleanText(res.Err.Error())), "\n")
+			box := strings.Split(boxed(sErrBox, max(m.width-4, 20), txt.CleanText(res.Err.Error())), "\n")
 			out = append(append(out, ""), box...)
 		}
 	}

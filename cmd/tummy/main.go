@@ -10,9 +10,10 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"syscall"
-	"tummy/internal/txt"
 
 	"github.com/spf13/cobra"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 	"tummy/internal/daemon"

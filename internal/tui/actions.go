@@ -13,9 +13,10 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"tummy/internal/txt"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 	"tummy/internal/daemon"
@@ -175,6 +176,18 @@ func runLabel(name string, streams []string) string {
 		return name
 	}
 	return name + " (" + strings.Join(streams, ", ") + ")"
+}
+
+// installDaemon installs and starts the systemd user service of tummy serve.
+func (m Model) installDaemon() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := daemon.Install(ctx, m.opts.ServeCommand); err != nil {
+			return statusMsg{Text: err.Error(), IsErr: true}
+		}
+		return statusMsg{Text: daemon.UnitName + " installed"}
+	}
 }
 
 func status(text string, isErr bool) tea.Cmd {

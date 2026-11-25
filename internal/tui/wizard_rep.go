@@ -9,13 +9,15 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"tummy/internal/txt"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+
+	txt "github.com/MaximKayTee/gotuitools/text"
 
 	"tummy/internal/config"
 	"tummy/internal/db"
+	"tummy/internal/engine"
 )
 
 var schedulePresets = []struct{ label, expr string }{
@@ -119,8 +121,9 @@ type repWizard struct {
 	entry    repEntry
 	touched  bool // streams were added, removed or changed
 
-	basics   *form
-	defaults *form
+	basics      *form
+	defaults    *form
+	defaultsFor srcKind // the source kind defaults was built for
 
 	cur        int
 	stream     *form // stream editor
@@ -224,7 +227,7 @@ func (w *repWizard) connNames(apiToo bool) []string {
 	var out []string
 	for _, n := range w.conns.Names() {
 		c := w.conns.Conn[n]
-		if apiToo || (c.Type != "api" && !c.ReadOnly) {
+		if apiToo || (engine.IsDatabase(c.Type) && !c.ReadOnly) {
 			out = append(out, n)
 		}
 	}
@@ -243,10 +246,19 @@ func connNotes(conns *config.Connections) map[string]string {
 	return out
 }
 
-func (w *repWizard) isAPI() bool {
+func (w *repWizard) isAPI() bool { return w.srcKind() == srcAPI }
+
+// srcKind is the kind of the draft's source connection.
+func (w *repWizard) srcKind() srcKind {
 	c, ok := w.conns.Conn[w.draft.Source]
-	return ok && c.Type == "api"
+	if !ok {
+		return srcDB
+	}
+	return kindOfConn(c.Type)
 }
+
+// noTables: the source has no table list, an API or a container.
+func (w *repWizard) noTables() bool { return w.srcKind() != srcDB }
 
 func (w *repWizard) title() string {
 	switch w.entry {
@@ -302,11 +314,14 @@ func (w *repWizard) footer() (string, string) {
 		return helpLine(append(append(w.defaults.hints(), "ctrl+s", save), jump...)...), helpLine("esc", escWord(w.defaults, "cancel"))
 	case stepStreams:
 		add := "add tables"
-		if w.isAPI() {
+		switch w.srcKind() {
+		case srcAPI:
 			add = "add endpoint"
+		case srcFiles:
+			add = "add files"
 		}
 		keys := []string{"a", add}
-		if !w.isAPI() {
+		if !w.noTables() {
 			keys = append(keys, "s", "sql query")
 		}
 		if len(w.draft.Streams) > 0 {
@@ -399,7 +414,7 @@ func (w *repWizard) start() tea.Cmd {
 // enterStreams reads the source's and target's tables for the lists, once.
 func (w *repWizard) enterStreams() tea.Cmd {
 	var cmds []tea.Cmd
-	if !w.isAPI() && w.srcTables == nil && !w.srcLoading {
+	if !w.noTables() && w.srcTables == nil && !w.srcLoading {
 		cmds = append(cmds, w.discover("source", w.draft.Source))
 	}
 	if w.tgtTables == nil && !w.tgtLoading {
@@ -534,7 +549,7 @@ func (w *repWizard) own(msg tea.Msg) (wizResult, tea.Cmd) {
 			focused = w.stream.focused.Key
 		}
 		w.stream = w.streamFormKinds(sd, names, kinds)
-		w.stream.note = fmt.Sprintf("sample: %s, %s", plural(msg.Records, "record"), plural(len(names), "column"))
+		w.stream.note = fmt.Sprintf("sample: %s, %s", txt.Plural(int64(msg.Records), "record"), txt.Plural(int64(len(names)), "column"))
 		if fl := w.stream.field(focused); fl != nil {
 			w.stream.focused = fl
 		}
@@ -694,7 +709,7 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 			return wizDone, nil
 		}
 		var cmd tea.Cmd
-		w.review, cmd = w.review.Update(msg)
+		w.review, cmd = w.review.Update(teaMsg(msg))
 		return wizContinue, cmd
 	}
 	return wizContinue, nil
@@ -703,7 +718,7 @@ func (w *repWizard) key(msg tea.KeyMsg) (wizResult, tea.Cmd) {
 // toDefaults opens the defaults step, built for the source's kind, and reads what its
 // lists offer.
 func (w *repWizard) toDefaults() (wizResult, tea.Cmd) {
-	if w.defaults == nil || w.defaults.field("records") != nil != w.isAPI() {
+	if w.defaults == nil || w.defaultsFor != w.srcKind() {
 		w.buildDefaults()
 	}
 	w.step = stepDefaults
